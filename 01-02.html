@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IR → Semantic Search → RAG 發展演進</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;900&family=Noto+Sans+TC:wght@300;400;500;700&display=swap');
+
+  :root {
+    --electric-blue: #0066ff;
+    --neon-cyan: #00ffff;
+    --dark-bg: #0d0d0d;
+    --card-bg: #1e1e1e;
+    --card-border: #2a2a2a;
+    --white: #ffffff;
+    --muted: #a0a0a0;
+    --highlight: #00e5ff;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--dark-bg);
+    color: var(--white);
+    font-family: 'Noto Sans TC', 'Inter', sans-serif;
+    line-height: 1.7;
+    min-height: 100vh;
+  }
+
+  /* ─── HERO ─── */
+  .hero {
+    background: linear-gradient(135deg, #050510 0%, #001133 50%, #050510 100%);
+    border-bottom: 1px solid #0066ff44;
+    padding: 64px 24px 56px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .hero::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse 80% 60% at 50% 0%, #0066ff22, transparent);
+    pointer-events: none;
+  }
+
+  .badge {
+    display: inline-block;
+    background: #0066ff22;
+    border: 1px solid #0066ff66;
+    color: var(--neon-cyan);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    padding: 6px 16px;
+    border-radius: 999px;
+    margin-bottom: 24px;
+  }
+
+  .hero h1 {
+    font-size: clamp(28px, 5vw, 52px);
+    font-weight: 900;
+    letter-spacing: -1px;
+    line-height: 1.15;
+    margin-bottom: 16px;
+  }
+
+  .hero h1 .accent { color: var(--neon-cyan); }
+
+  .hero .sub {
+    font-size: 16px;
+    color: var(--muted);
+    max-width: 560px;
+    margin: 0 auto 32px;
+  }
+
+  .author-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--muted);
+    font-size: 13px;
+  }
+  .author-tag::before {
+    content: '▶';
+    color: var(--electric-blue);
+    font-size: 10px;
+  }
+
+  /* ─── LAYOUT ─── */
+  .container { max-width: 1000px; margin: 0 auto; padding: 48px 24px; }
+
+  /* ─── SECTION TITLE ─── */
+  .section-label {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--electric-blue);
+    margin-bottom: 24px;
+  }
+  .section-label::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(to right, #0066ff44, transparent);
+  }
+
+  /* ─── CORE ESSENCE ─── */
+  .essence-card {
+    background: linear-gradient(135deg, #001030, #00183a);
+    border: 1px solid #0066ff55;
+    border-radius: 16px;
+    padding: 32px;
+    margin-bottom: 48px;
+    position: relative;
+    overflow: hidden;
+  }
+  .essence-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(to right, var(--electric-blue), var(--neon-cyan));
+  }
+  .essence-card h2 {
+    font-size: 22px;
+    font-weight: 700;
+    margin-bottom: 16px;
+    color: var(--white);
+  }
+  .essence-card p { color: #ccc; font-size: 15px; }
+  .essence-card .highlight-text {
+    color: var(--neon-cyan);
+    font-weight: 600;
+  }
+
+  /* ─── EVOLUTION TIMELINE ─── */
+  .timeline { display: flex; flex-direction: column; gap: 0; margin-bottom: 48px; }
+
+  .phase {
+    display: grid;
+    grid-template-columns: 160px 1fr;
+    gap: 0 32px;
+    position: relative;
+  }
+
+  .phase-connector {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding-top: 4px;
+  }
+
+  .phase-dot {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 1;
+  }
+  .phase-dot.ir   { background: #1a2a4a; border: 2px solid #3366aa; }
+  .phase-dot.sem  { background: #1a3a2a; border: 2px solid #339966; }
+  .phase-dot.rag  { background: #2a1a3a; border: 2px solid #9933cc; }
+  .phase-dot.adv  { background: #3a2a1a; border: 2px solid #cc6600; }
+
+  .phase-line {
+    width: 2px;
+    flex: 1;
+    min-height: 32px;
+    background: linear-gradient(to bottom, #0066ff44, transparent);
+    margin: 4px 0;
+  }
+
+  .phase-meta { padding-bottom: 8px; text-align: right; }
+  .phase-era {
+    font-size: 11px;
+    letter-spacing: 1px;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .phase-name {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--white);
+  }
+
+  .phase-card {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin-bottom: 16px;
+    transition: border-color 0.2s;
+  }
+  .phase-card:hover { border-color: #0066ff66; }
+
+  .phase-card h3 {
+    font-size: 17px;
+    font-weight: 700;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .tag {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+  .tag-ir   { background: #3366aa22; color: #6699ff; border: 1px solid #3366aa55; }
+  .tag-sem  { background: #33996622; color: #66cc99; border: 1px solid #33996655; }
+  .tag-rag  { background: #9933cc22; color: #cc66ff; border: 1px solid #9933cc55; }
+  .tag-adv  { background: #cc660022; color: #ffaa44; border: 1px solid #cc660055; }
+
+  .phase-card ul {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .phase-card ul li {
+    font-size: 14px;
+    color: #ccc;
+    padding-left: 16px;
+    position: relative;
+  }
+  .phase-card ul li::before {
+    content: '→';
+    position: absolute;
+    left: 0;
+    color: var(--electric-blue);
+    font-size: 12px;
+  }
+
+  /* ─── KEY CONCEPTS ─── */
+  .grid-3 {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 16px;
+    margin-bottom: 48px;
+  }
+
+  .concept-card {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    padding: 20px;
+    transition: transform 0.2s, border-color 0.2s;
+  }
+  .concept-card:hover { transform: translateY(-2px); border-color: #0066ff55; }
+
+  .concept-icon { font-size: 28px; margin-bottom: 12px; }
+  .concept-card h3 { font-size: 15px; font-weight: 700; margin-bottom: 8px; color: var(--neon-cyan); }
+  .concept-card p { font-size: 13px; color: #bbb; line-height: 1.6; }
+
+  /* ─── COMPARISON TABLE ─── */
+  .table-wrap { overflow-x: auto; margin-bottom: 48px; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+  }
+  thead tr { border-bottom: 2px solid var(--electric-blue); }
+  thead th {
+    text-align: left;
+    padding: 12px 16px;
+    color: var(--neon-cyan);
+    font-weight: 700;
+    font-size: 12px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  tbody tr {
+    border-bottom: 1px solid #222;
+    transition: background 0.15s;
+  }
+  tbody tr:hover { background: #1e1e2e; }
+  tbody td {
+    padding: 12px 16px;
+    color: #ccc;
+    vertical-align: top;
+  }
+  tbody td:first-child { font-weight: 700; color: var(--white); }
+
+  /* ─── TAKEAWAYS ─── */
+  .takeaways {
+    background: linear-gradient(135deg, #0a0a1a, #050518);
+    border: 1px solid #0066ff44;
+    border-radius: 16px;
+    padding: 32px;
+    margin-bottom: 48px;
+  }
+  .takeaways h2 { font-size: 20px; font-weight: 700; margin-bottom: 20px; }
+  .takeaway-list { display: flex; flex-direction: column; gap: 14px; }
+  .takeaway-item {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+  }
+  .takeaway-num {
+    width: 28px;
+    height: 28px;
+    background: var(--electric-blue);
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    flex-shrink: 0;
+    color: #fff;
+  }
+  .takeaway-item p { font-size: 14px; color: #ccc; padding-top: 4px; }
+  .takeaway-item p strong { color: var(--white); }
+
+  /* ─── FOOTER ─── */
+  footer {
+    text-align: center;
+    padding: 32px 24px;
+    border-top: 1px solid #1e1e1e;
+    color: #555;
+    font-size: 12px;
+  }
+
+  @media (max-width: 600px) {
+    .phase { grid-template-columns: 80px 1fr; gap: 0 16px; }
+    .phase-meta { font-size: 10px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="badge">課程筆記 · 精華整理</div>
+  <h1>從 IR 到 <span class="accent">RAG</span><br>搜尋技術發展演進</h1>
+  <p class="sub">完整梳理搜尋技術從 1960 年代關鍵字比對，演進至語意搜尋，再到現代 RAG 生態系的脈絡</p>
+  <span class="author-tag">張維元 · RAG 精準搜尋實戰 01–02</span>
+</div>
+
+<div class="container">
+
+  <!-- CORE ESSENCE -->
+  <div class="section-label">搜尋的本質</div>
+  <div class="essence-card">
+    <h2>搜尋的核心目標：從大量資訊中，快速找到對使用者有價值的內容</h2>
+    <p>衡量一個搜尋系統的關鍵，永遠只有兩件事：<span class="highlight-text">查詢速度</span>與<span class="highlight-text">結果準確性</span>。整條搜尋技術線可追溯回 1960 年代，歷經三個世代的演進，才走到今日的 RAG 架構。</p>
+  </div>
+
+  <!-- EVOLUTION TIMELINE -->
+  <div class="section-label">三大演進階段</div>
+  <div class="timeline">
+
+    <!-- IR -->
+    <div class="phase">
+      <div style="text-align:right; padding-top:10px; padding-right: 8px;">
+        <div class="phase-era">1960s →</div>
+        <div class="phase-name">第一代</div>
+        <div style="display:flex; justify-content:flex-end; margin-top:12px;">
+          <div style="display:flex; flex-direction:column; align-items:center;">
+            <div class="phase-dot ir">📚</div>
+            <div class="phase-line"></div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="phase-card">
+          <h3>Information Retrieval (IR) <span class="tag tag-ir">關鍵字比對</span></h3>
+          <ul>
+            <li>像查字典：輸入關鍵字，找出出現該詞彙的文件位置</li>
+            <li>核心技術：<strong>Indexing 索引</strong>——如 Google 的 Inverted Index（反向索引）</li>
+            <li>整個流程：儲存 → 索引 → 解鎖 → 排序</li>
+            <li>限制：要求字串完全匹配，無法理解語意或意圖</li>
+            <li>來自資料庫領域，本質是解決「資料太多，如何快速查找」的工程問題</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Semantic Search -->
+    <div class="phase">
+      <div style="text-align:right; padding-top:10px; padding-right: 8px;">
+        <div class="phase-era">2010s →</div>
+        <div class="phase-name">第二代</div>
+        <div style="display:flex; justify-content:flex-end; margin-top:12px;">
+          <div style="display:flex; flex-direction:column; align-items:center;">
+            <div class="phase-dot sem">🧠</div>
+            <div class="phase-line"></div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="phase-card">
+          <h3>Semantic Search 語意搜尋 <span class="tag tag-sem">向量相似度</span></h3>
+          <ul>
+            <li>解決「模糊搜尋」需求：你要搜的概念不一定是明確關鍵字</li>
+            <li>例：搜尋「減脂」→ 語意擴展為「飲食控制、有氧運動、熱量限制」</li>
+            <li>核心技術：<strong>Embedding 向量化</strong>——讓電腦理解文字的語意關係</li>
+            <li>從精準比對 keyword → 概念匹配的 Semantic 向量空間</li>
+            <li>限制：只能「找到」文件，無法讓結果變得更易讀、更友善</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- RAG -->
+    <div class="phase">
+      <div style="text-align:right; padding-top:10px; padding-right: 8px;">
+        <div class="phase-era">2022 →</div>
+        <div class="phase-name">第三代</div>
+        <div style="display:flex; justify-content:flex-end; margin-top:12px;">
+          <div style="display:flex; flex-direction:column; align-items:center;">
+            <div class="phase-dot rag">⚡</div>
+            <div class="phase-line"></div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="phase-card">
+          <h3>RAG — Retrieval Augmented Generation <span class="tag tag-rag">檢索 + 生成</span></h3>
+          <ul>
+            <li>將語意檢索（找資料）與 LLM 生成（產出答案）串連為一體</li>
+            <li>把排序升級為 <strong>ReRank</strong>，把搜尋升級為向量相似模糊搜尋</li>
+            <li>RAG 不是取代搜尋，而是讓搜尋結果更智慧、更 User-Friendly</li>
+            <li>讓 LLM 不只是聊天機器人，而是企業等級的知識庫智慧系統</li>
+            <li>RAG 是系統工程：可拆解、可調教、可逐層優化</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Advanced -->
+    <div class="phase">
+      <div style="text-align:right; padding-top:10px; padding-right: 8px;">
+        <div class="phase-era">現在 →</div>
+        <div class="phase-name">進階發展</div>
+        <div style="display:flex; justify-content:flex-end; margin-top:12px;">
+          <div style="display:flex; flex-direction:column; align-items:center;">
+            <div class="phase-dot adv">🚀</div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="phase-card">
+          <h3>Agentic RAG / GraphRAG <span class="tag tag-adv">主動解鎖</span></h3>
+          <ul>
+            <li>Hybrid Search：關鍵字搜尋 + 語意搜尋的混合策略</li>
+            <li>GraphRAG：以關係結構重新組織知識，找到更有關聯性的資料</li>
+            <li>Agentic RAG：主動解鎖，讓系統自行決策如何搜尋</li>
+            <li>加入記憶、結構化／非結構化資料整合，擴展成完整生態系</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /timeline -->
+
+  <!-- KEY CONCEPTS -->
+  <div class="section-label">核心概念解析</div>
+  <div class="grid-3">
+    <div class="concept-card">
+      <div class="concept-icon">🗂️</div>
+      <h3>Inverted Index 反向索引</h3>
+      <p>IR 的核心技術，記錄每個關鍵字出現在哪些文件哪個位置，實現毫秒級查詢。Google 搜尋引擎的基礎。</p>
+    </div>
+    <div class="concept-card">
+      <div class="concept-icon">🔢</div>
+      <h3>Embedding 向量化</h3>
+      <p>將文字轉換為高維度數值向量，讓電腦能夠計算語意相似度。是語意搜尋與 RAG 的共同基礎。</p>
+    </div>
+    <div class="concept-card">
+      <div class="concept-icon">🔃</div>
+      <h3>ReRank 重新排序</h3>
+      <p>RAG 對傳統排序的升級。在召回候選文件後，再用更精細的模型重新評分排列，提升結果品質。</p>
+    </div>
+    <div class="concept-card">
+      <div class="concept-icon">🏗️</div>
+      <h3>RAG 是系統工程</h3>
+      <p>可拆解為 Pre-retrieval、Retrieval、Post-retrieval 多層。每層都能獨立優化，從 Prototype 到 Production 的關鍵。</p>
+    </div>
+    <div class="concept-card">
+      <div class="concept-icon">🏢</div>
+      <h3>企業知識庫應用</h3>
+      <p>從 BI 報表到自然語言問答，RAG 讓 Data Lake / Data Warehouse 能夠被語意查詢，打造企業等級智慧中台。</p>
+    </div>
+    <div class="concept-card">
+      <div class="concept-icon">🔧</div>
+      <h3>調教能力的重要性</h3>
+      <p>知道結果不好只是起點，真正的能力是反推哪一層出了問題並修正——就像資深修車師傅診斷引擎聲。</p>
+    </div>
+  </div>
+
+  <!-- COMPARISON TABLE -->
+  <div class="section-label">三代技術對比</div>
+  <div class="table-wrap" style="margin-bottom:48px;">
+    <table>
+      <thead>
+        <tr>
+          <th>技術</th>
+          <th>搜尋方式</th>
+          <th>核心技術</th>
+          <th>優勢</th>
+          <th>限制</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>IR 資訊檢索</td>
+          <td>關鍵字精準比對</td>
+          <td>Inverted Index</td>
+          <td>速度快、精準</td>
+          <td>無法理解語意、須完全匹配</td>
+        </tr>
+        <tr>
+          <td>Semantic Search</td>
+          <td>向量相似度模糊搜尋</td>
+          <td>Embedding 向量化</td>
+          <td>理解意圖、模糊擴展</td>
+          <td>結果不易讀、缺乏生成能力</td>
+        </tr>
+        <tr>
+          <td>RAG</td>
+          <td>語意檢索 + LLM 生成</td>
+          <td>向量DB + LLM + ReRank</td>
+          <td>結果友善、智慧生成</td>
+          <td>複雜度高、需系統工程調教</td>
+        </tr>
+        <tr>
+          <td>Agentic / GraphRAG</td>
+          <td>關係結構 + 主動解鎖</td>
+          <td>知識圖譜 + Agent</td>
+          <td>處理複雜關聯查詢</td>
+          <td>架構更複雜，成本較高</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- TAKEAWAYS -->
+  <div class="section-label">課程核心結論</div>
+  <div class="takeaways">
+    <h2>🎯 本集五大重點</h2>
+    <div class="takeaway-list">
+      <div class="takeaway-item">
+        <div class="takeaway-num">1</div>
+        <p><strong>理解脈絡才能用好工具</strong>——RAG 不是憑空出現的魔法，是 60 年搜尋技術演進的自然結果。</p>
+      </div>
+      <div class="takeaway-item">
+        <div class="takeaway-num">2</div>
+        <p><strong>RAG 不取代搜尋，而是升級搜尋</strong>——它在傳統架構上，把排序升為 ReRank、把比對升為語意向量搜尋，再加上 LLM 生成。</p>
+      </div>
+      <div class="takeaway-item">
+        <div class="takeaway-num">3</div>
+        <p><strong>Embedding 是語意搜尋的核心</strong>——讓電腦能夠理解「減脂 ≈ 飲食控制 + 有氧運動」這種語意關聯。</p>
+      </div>
+      <div class="takeaway-item">
+        <div class="takeaway-num">4</div>
+        <p><strong>RAG 是系統工程，不只是 Prompt Engineering</strong>——設計資料來源、搜尋策略、評估、優化才是 RAG 的真正挑戰。</p>
+      </div>
+      <div class="takeaway-item">
+        <div class="takeaway-num">5</div>
+        <p><strong>目標是 Production 等級</strong>——從 Prototype 到真正可用、好用且能持續進步的 RAG 系統，需要完整的工程能力。</p>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /container -->
+
+<footer>
+  整理自張維元《RAG 精準搜尋實戰》01–02 · IR, Semantic Search, RAG 發展演進
+</footer>
+
+</body>
+</html>

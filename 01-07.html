@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>徒手實作簡化版 RAG — TF-IDF × Cosine × Threshold</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --navy:       #1a2332;
+      --navy-mid:   #22304a;
+      --navy-dark:  #0d1824;
+      --teal:       #2d8b8b;
+      --teal-light: #3aabab;
+      --seafoam:    #a8dadc;
+      --cream:      #f1faee;
+      --white:      #ffffff;
+      --amber:      #e8a14a;
+      --green:      #6bcb77;
+      --red:        #e06c75;
+    }
+    body { font-family: 'Noto Sans TC', sans-serif; background: var(--navy); color: var(--cream); line-height: 1.7; }
+
+    /* ── HERO ── */
+    header {
+      background: linear-gradient(135deg, #0d1824 0%, var(--navy-mid) 55%, #193e3e 100%);
+      padding: 64px 40px 52px; text-align: center; position: relative; overflow: hidden;
+    }
+    header::before {
+      content: ''; position: absolute; inset: 0;
+      background:
+        radial-gradient(ellipse 55% 45% at 15% 85%, rgba(45,139,139,.2) 0%, transparent 65%),
+        radial-gradient(ellipse 45% 55% at 85% 15%, rgba(168,218,220,.1) 0%, transparent 65%);
+    }
+    .badge { display: inline-block; background: rgba(45,139,139,.25); border: 1px solid var(--teal); color: var(--seafoam); font-size: .72rem; font-weight: 700; letter-spacing: .14em; padding: 5px 16px; border-radius: 20px; margin-bottom: 18px; position: relative; }
+    header h1 { font-size: clamp(1.75rem,4vw,2.8rem); font-weight: 900; color: var(--white); line-height: 1.25; position: relative; margin-bottom: 14px; }
+    header h1 span { color: var(--seafoam); }
+    header p.subtitle { font-size: .94rem; color: rgba(241,250,238,.6); max-width: 580px; margin: 0 auto; position: relative; }
+
+    main { max-width: 980px; margin: 0 auto; padding: 52px 24px 80px; }
+
+    /* ── SECTION ── */
+    .sec { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; margin-top: 52px; }
+    .sec:first-child { margin-top: 0; }
+    .sec .bar { width: 4px; height: 26px; background: linear-gradient(180deg, var(--teal), var(--seafoam)); border-radius: 2px; flex-shrink: 0; }
+    .sec h2 { font-size: 1.2rem; font-weight: 700; color: var(--seafoam); letter-spacing: .04em; }
+
+    /* ── INTRO ── */
+    .intro { background: linear-gradient(135deg, var(--navy-mid), #1d3a3a); border: 1px solid rgba(45,139,139,.4); border-radius: 16px; padding: 26px 32px; font-size: .95rem; color: rgba(241,250,238,.82); }
+    .intro strong { color: var(--seafoam); }
+
+    /* ── TECH STACK PILLS ── */
+    .stack { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+    .stack-pill { background: rgba(45,139,139,.15); border: 1px solid rgba(45,139,139,.35); color: var(--seafoam); border-radius: 8px; padding: 7px 16px; font-size: .84rem; display: flex; align-items: center; gap: 7px; }
+    .stack-pill .sp-icon { font-size: 1rem; }
+    .stack-pill code { font-family: 'JetBrains Mono', monospace; font-size: .78rem; color: var(--teal-light); }
+
+    /* ── FLOW STEPS ── */
+    .flow-steps { display: flex; flex-direction: column; gap: 0; }
+    .fstep {
+      display: grid; grid-template-columns: 52px 1fr;
+      gap: 0 18px; position: relative;
+    }
+    .fstep-dot-col { display: flex; flex-direction: column; align-items: center; }
+    .fstep-dot {
+      width: 52px; height: 52px; border-radius: 50%;
+      background: var(--navy-dark); border: 2px solid var(--teal);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.1rem; flex-shrink: 0; z-index: 1;
+    }
+    .fstep-line { width: 2px; flex: 1; background: linear-gradient(180deg, var(--teal) 0%, rgba(45,139,139,.1) 100%); margin: 4px 0; min-height: 20px; }
+    .fstep:last-child .fstep-line { display: none; }
+    .fstep-body { background: var(--navy-mid); border: 1px solid rgba(45,139,139,.22); border-radius: 12px; padding: 18px 22px; margin-bottom: 16px; }
+    .fstep-body h3 { font-size: .98rem; font-weight: 700; color: var(--white); margin-bottom: 6px; }
+    .fstep-body p { font-size: .875rem; color: rgba(241,250,238,.72); }
+
+    /* ── CODE BLOCK ── */
+    .code-wrap { background: var(--navy-dark); border: 1px solid rgba(45,139,139,.3); border-radius: 10px; overflow-x: auto; margin-top: 12px; }
+    .code-title { background: rgba(45,139,139,.18); padding: 7px 16px; font-size: .7rem; color: var(--teal-light); font-family: 'JetBrains Mono', monospace; letter-spacing: .06em; border-bottom: 1px solid rgba(45,139,139,.2); }
+    pre { font-family: 'JetBrains Mono', monospace; font-size: .79rem; line-height: 1.7; color: #c8d8e8; padding: 16px 20px; white-space: pre; }
+    .kw  { color: #58a6ff; }
+    .fn  { color: #79c0ff; }
+    .str { color: #a5d6a7; }
+    .cm  { color: #5a7490; }
+    .num { color: #ffa657; }
+    .cls { color: #ffd700; }
+
+    /* ── COMPARE CARDS ── */
+    .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media(max-width:620px){ .compare { grid-template-columns: 1fr; } }
+    .cmp-card { border-radius: 14px; padding: 22px 24px; }
+    .cmp-good { background: rgba(107,203,119,.07); border: 1px solid rgba(107,203,119,.3); }
+    .cmp-bad  { background: rgba(232,161,74,.07);  border: 1px solid rgba(232,161,74,.3); }
+    .cmp-label { font-size: .7rem; font-weight: 700; letter-spacing: .12em; margin-bottom: 10px; }
+    .cmp-good .cmp-label { color: var(--green); }
+    .cmp-bad  .cmp-label { color: var(--amber); }
+    .cmp-card h3 { font-size: .97rem; font-weight: 700; color: var(--white); margin-bottom: 8px; }
+    .cmp-card p  { font-size: .86rem; color: rgba(241,250,238,.72); }
+    .cmp-card .result-box { margin-top: 12px; background: var(--navy-dark); border-radius: 8px; padding: 10px 14px; font-size: .8rem; font-family: 'JetBrains Mono', monospace; color: rgba(241,250,238,.7); }
+
+    /* ── TFIDF VISUAL ── */
+    .matrix-wrap { background: var(--navy-mid); border: 1px solid rgba(45,139,139,.25); border-radius: 14px; padding: 22px 24px; overflow-x: auto; }
+    .matrix-wrap p { font-size: .875rem; color: rgba(241,250,238,.7); margin-bottom: 16px; }
+    .matrix-table { border-collapse: collapse; font-family: 'JetBrains Mono', monospace; font-size: .76rem; min-width: 480px; }
+    .matrix-table th { background: rgba(45,139,139,.25); color: var(--seafoam); padding: 8px 12px; text-align: center; border: 1px solid rgba(45,139,139,.2); }
+    .matrix-table td { padding: 7px 12px; text-align: center; border: 1px solid rgba(45,139,139,.12); color: rgba(241,250,238,.65); }
+    .matrix-table td.row-label { text-align: left; color: rgba(241,250,238,.55); font-size: .72rem; min-width: 160px; }
+    .matrix-table td.hi { color: var(--seafoam); font-weight: 600; background: rgba(45,139,139,.12); }
+    .matrix-table td.zero { color: rgba(241,250,238,.2); }
+
+    /* ── THRESHOLD SLIDER VIZ ── */
+    .threshold-card { background: var(--navy-mid); border: 1px solid rgba(45,139,139,.25); border-radius: 14px; padding: 24px 28px; }
+    .th-track { position: relative; height: 12px; background: rgba(255,255,255,.07); border-radius: 6px; margin: 20px 0 10px; }
+    .th-fill-low  { position: absolute; left: 0;   width: 30%;  height: 100%; background: rgba(224,108,117,.5); border-radius: 6px 0 0 6px; }
+    .th-fill-mid  { position: absolute; left: 30%; width: 40%;  height: 100%; background: linear-gradient(90deg, var(--teal), var(--seafoam)); }
+    .th-fill-high { position: absolute; left: 70%; width: 30%;  height: 100%; background: rgba(232,161,74,.5);   border-radius: 0 6px 6px 0; }
+    .th-label-row { display: flex; justify-content: space-between; font-size: .74rem; }
+    .th-label-row .tl { color: var(--red);   }
+    .th-label-row .tm { color: var(--seafoam); text-align: center; }
+    .th-label-row .tr { color: var(--amber); }
+    .th-cases { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-top: 20px; }
+    @media(max-width:620px){ .th-cases { grid-template-columns: 1fr; } }
+    .th-case { border-radius: 10px; padding: 14px 16px; text-align: center; }
+    .th-case.low  { background: rgba(224,108,117,.08); border: 1px solid rgba(224,108,117,.3); }
+    .th-case.mid  { background: rgba(45,139,139,.1);   border: 1px solid rgba(45,139,139,.4); }
+    .th-case.high { background: rgba(232,161,74,.08);  border: 1px solid rgba(232,161,74,.3); }
+    .th-case .tc-val { font-family: 'JetBrains Mono', monospace; font-size: 1.3rem; font-weight: 700; margin-bottom: 6px; }
+    .th-case.low  .tc-val { color: var(--red);    }
+    .th-case.mid  .tc-val { color: var(--seafoam); }
+    .th-case.high .tc-val { color: var(--amber);  }
+    .th-case .tc-title { font-size: .82rem; font-weight: 700; color: var(--white); margin-bottom: 4px; }
+    .th-case .tc-desc  { font-size: .78rem; color: rgba(241,250,238,.6); }
+
+    /* ── GOLDEN RULE ── */
+    .golden { background: rgba(45,139,139,.1); border-left: 4px solid var(--teal); border-radius: 0 12px 12px 0; padding: 18px 26px; font-size: .93rem; color: rgba(241,250,238,.85); margin-bottom: 12px; }
+    .golden strong { color: var(--seafoam); }
+
+    /* ── SUMMARY TABLE ── */
+    .tbl-wrap { overflow-x: auto; border-radius: 12px; border: 1px solid rgba(45,139,139,.25); }
+    .sum-table { width: 100%; border-collapse: collapse; }
+    .sum-table th { background: rgba(45,139,139,.25); color: var(--seafoam); font-size: .8rem; font-weight: 700; letter-spacing: .05em; padding: 11px 16px; text-align: left; border-bottom: 2px solid var(--teal); }
+    .sum-table td { padding: 11px 16px; font-size: .86rem; color: rgba(241,250,238,.78); border-bottom: 1px solid rgba(45,139,139,.15); vertical-align: top; }
+    .sum-table tr:last-child td { border-bottom: none; }
+    .sum-table tr:nth-child(odd) td { background: rgba(255,255,255,.025); }
+    .chip { display: inline-block; background: rgba(45,139,139,.2); border: 1px solid rgba(45,139,139,.4); color: var(--seafoam); font-size: .75rem; font-weight: 600; border-radius: 6px; padding: 2px 9px; font-family: 'JetBrains Mono', monospace; }
+
+    footer { text-align: center; padding: 30px 24px; border-top: 1px solid rgba(45,139,139,.2); font-size: .78rem; color: rgba(241,250,238,.3); }
+    footer strong { color: var(--teal-light); }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="badge">🛠️ 實作單元整理</div>
+  <h1>徒手實作<span>簡化版 RAG</span></h1>
+  <p class="subtitle">張維元 ── RAG 精準搜尋實戰 01-07 | 不用框架，用 TF-IDF + Cosine 相似度從零打造 RAG 核心邏輯</p>
+</header>
+
+<main>
+
+  <!-- 實作目標 -->
+  <div class="sec"><div class="bar"></div><h2>🎯 實作目標與技術選型</h2></div>
+  <div class="intro">
+    延續上一集的 pgvector 語意搜尋，這次改用<strong>不依賴任何向量資料庫框架</strong>的「土炮方法」——以 <strong>sklearn 的 TF-IDF</strong> 模擬向量語意空間，搭配 <strong>Cosine 相似度</strong>，再串接 <strong>OpenAI LLM</strong>，完整走完一遍 RAG 的核心邏輯。讓你真正看懂 RAG 在做什麼。
+  </div>
+  <div class="stack">
+    <div class="stack-pill"><span class="sp-icon">🐍</span><code>sklearn</code> TF-IDF 向量化</div>
+    <div class="stack-pill"><span class="sp-icon">📐</span><code>cosine_similarity</code> 相似度計算</div>
+    <div class="stack-pill"><span class="sp-icon">🤖</span><code>OpenAI API</code> LLM 生成</div>
+    <div class="stack-pill"><span class="sp-icon">🔢</span>稀疏矩陣向量空間</div>
+    <div class="stack-pill"><span class="sp-icon">🎚️</span>Threshold 相似度門檻</div>
+  </div>
+
+  <!-- 完整實作流程 -->
+  <div class="sec"><div class="bar"></div><h2>🪜 完整實作流程</h2></div>
+  <div class="flow-steps">
+
+    <div class="fstep">
+      <div class="fstep-dot-col">
+        <div class="fstep-dot">📄</div>
+        <div class="fstep-line"></div>
+      </div>
+      <div class="fstep-body">
+        <h3>準備語料庫（Corpus）</h3>
+        <p>準備數筆文件作為知識來源。範例使用 RAG 相關說明文字，每一句話代表一個知識片段（Chunk）。</p>
+        <div class="code-wrap">
+          <div class="code-title">Python — 定義語料庫</div>
+          <pre><span class="cm"># 模擬 RAG 知識庫（4 筆資料）</span>
+corpus = [
+    <span class="str">"RAG 是檢索增強生成技術"</span>,
+    <span class="str">"RAG 結合了搜尋與語言模型"</span>,
+    <span class="str">"如何實作 RAG"</span>,
+    <span class="str">"嵌入和向量資料庫是 RAG 的基礎"</span>,
+]</pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="fstep">
+      <div class="fstep-dot-col">
+        <div class="fstep-dot">🔢</div>
+        <div class="fstep-line"></div>
+      </div>
+      <div class="fstep-body">
+        <h3>TF-IDF 向量化語料庫</h3>
+        <p>使用 sklearn 的 <code style="font-family:'JetBrains Mono';font-size:.8rem;color:var(--teal-light)">TfidfVectorizer</code> 將文字轉換為稀疏向量矩陣（4×6），每個字作為一個維度，數值代表在該句中的相對重要性。</p>
+        <div class="code-wrap">
+          <div class="code-title">Python — 建立 TF-IDF 向量空間</div>
+          <pre><span class="kw">from</span> sklearn.feature_extraction.text <span class="kw">import</span> <span class="cls">TfidfVectorizer</span>
+<span class="kw">from</span> sklearn.metrics.pairwise <span class="kw">import</span> cosine_similarity
+
+vectorizer = <span class="cls">TfidfVectorizer</span>()
+corpus_vectors = vectorizer.<span class="fn">fit_transform</span>(corpus)
+<span class="cm"># 結果：4×6 稀疏矩陣（4 句話，6 個關鍵詞維度）</span></pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="fstep">
+      <div class="fstep-dot-col">
+        <div class="fstep-dot">🔍</div>
+        <div class="fstep-line"></div>
+      </div>
+      <div class="fstep-body">
+        <h3>查詢向量化 → Cosine 相似度比對 → 取 Top-K</h3>
+        <p>將使用者的提問同樣轉換為 TF-IDF 向量，再與語料庫中每一筆向量計算 Cosine 相似度，取出最相似的 K 筆資料作為上下文。</p>
+        <div class="code-wrap">
+          <div class="code-title">Python — 語意檢索函式</div>
+          <pre><span class="kw">def</span> <span class="fn">retrieve</span>(query, k=<span class="num">2</span>, threshold=<span class="num">0.0</span>):
+    query_vec = vectorizer.<span class="fn">transform</span>([query])
+    scores = <span class="fn">cosine_similarity</span>(query_vec, corpus_vectors)[<span class="num">0</span>]
+
+    <span class="cm"># 依相似度排序，取 Top-K</span>
+    ranked = scores.<span class="fn">argsort</span>()[::-<span class="num">1</span>][:k]
+
+    <span class="cm"># 套用 threshold 門檻過濾</span>
+    results = [corpus[i] <span class="kw">for</span> i <span class="kw">in</span> ranked <span class="kw">if</span> scores[i] >= threshold]
+    <span class="kw">return</span> results</pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="fstep">
+      <div class="fstep-dot-col">
+        <div class="fstep-dot">📎</div>
+        <div class="fstep-line"></div>
+      </div>
+      <div class="fstep-body">
+        <h3>將檢索結果注入 Prompt → LLM 生成答案</h3>
+        <p>把 Top-K 的結果組合成「上下文參考資料」，拼入 Prompt，讓 LLM 根據這些資料回答，而非憑自身訓練記憶回答。</p>
+        <div class="code-wrap">
+          <div class="code-title">Python — 上下文注入與 LLM 生成</div>
+          <pre><span class="kw">from</span> openai <span class="kw">import</span> <span class="cls">OpenAI</span>
+client = <span class="cls">OpenAI</span>()
+
+<span class="kw">def</span> <span class="fn">rag_answer</span>(question, threshold=<span class="num">0.3</span>):
+    context_docs = <span class="fn">retrieve</span>(question, k=<span class="num">2</span>, threshold=threshold)
+
+    <span class="kw">if not</span> context_docs:
+        <span class="kw">return</span> <span class="str">"找不到相關資料，無法回答。"</span>
+
+    context = <span class="str">"\n"</span>.<span class="fn">join</span>(context_docs)
+    prompt = <span class="fn">f</span><span class="str">"""根據以下上下文回答問題：
+上下文：{context}
+問題：{question}
+請根據上下文作答。"""</span>
+
+    res = client.chat.completions.<span class="fn">create</span>(
+        model=<span class="str">"gpt-4o-mini"</span>,
+        messages=[{<span class="str">"role"</span>: <span class="str">"user"</span>, <span class="str">"content"</span>: prompt}]
+    )
+    <span class="kw">return</span> res.choices[<span class="num">0</span>].message.content</pre>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- TF-IDF 矩陣說明 -->
+  <div class="sec"><div class="bar"></div><h2>🔢 TF-IDF 向量矩陣長什麼樣</h2></div>
+  <div class="matrix-wrap">
+    <p>4 筆語料轉換後得到 <strong>4×6 的稀疏矩陣</strong>：每列是一句話，每欄是一個關鍵詞。數值代表該詞在這句話中的 TF-IDF 權重。出現在<strong>所有句子</strong>中的詞（如「RAG」）權重會被壓低，<strong>句子獨有的詞</strong>權重反而更高。</p>
+    <table class="matrix-table">
+      <thead>
+        <tr>
+          <th>語料</th>
+          <th>RAG</th>
+          <th>檢索</th>
+          <th>增強</th>
+          <th>向量</th>
+          <th>資料庫</th>
+          <th>實作</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td class="row-label">RAG 是檢索增強生成技術</td><td class="zero">↓低</td><td class="hi">0.71</td><td class="hi">0.71</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+        <tr><td class="row-label">RAG 結合搜尋與語言模型</td><td class="zero">↓低</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+        <tr><td class="row-label">如何實作 RAG</td><td class="zero">↓低</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="hi">1.0</td></tr>
+        <tr><td class="row-label">嵌入和向量資料庫是RAG基礎</td><td class="zero">↓低</td><td class="zero">0</td><td class="zero">0</td><td class="hi">0.63</td><td class="hi">0.63</td><td class="zero">0</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- 有無上下文對比 -->
+  <div class="sec"><div class="bar"></div><h2>⚖️ 有上下文 vs 無上下文的差異</h2></div>
+  <div class="compare">
+    <div class="cmp-card cmp-good">
+      <div class="cmp-label">✅ WITH CONTEXT（RAG 模式）</div>
+      <h3>根據檢索資料回答</h3>
+      <p>先從語料庫找到相似段落，注入 Prompt，LLM 依據這些資料生成答案，<strong>回答內容受限於你的知識庫</strong>，不會憑空捏造。</p>
+      <div class="result-box">Q: RAG 是什麼？<br>→ 根據資料：RAG 是檢索增強生成技術，<br>　 結合了搜尋與語言模型...</div>
+    </div>
+    <div class="cmp-card cmp-bad">
+      <div class="cmp-label">⚠️ WITHOUT CONTEXT（純 LLM）</div>
+      <h3>依賴模型訓練記憶</h3>
+      <p>LLM 直接用訓練資料中的知識回答。若是企業私有資料或模型未見過的內容，<strong>幻覺風險極高</strong>。</p>
+      <div class="result-box">Q: [你公司的專屬資料問題]<br>→ 模型可能生成聽起來合理<br>　 但實際上完全錯誤的答案...</div>
+    </div>
+  </div>
+
+  <!-- Threshold 機制 -->
+  <div class="sec"><div class="bar"></div><h2>🎚️ Threshold 相似度門檻的權衡</h2></div>
+  <div class="threshold-card">
+    <p style="font-size:.9rem;color:rgba(241,250,238,.75);margin-bottom:0">
+      即使查詢內容不在資料庫中（如「請問 Agent 是什麼」），RAG 仍會勉強找出「最像」的結果並生成奇怪答案。加上 <strong style="color:var(--seafoam)">Threshold 門檻</strong>，可過濾掉相似度不足的結果，避免無中生有。
+    </p>
+    <div class="th-track">
+      <div class="th-fill-low"></div>
+      <div class="th-fill-mid"></div>
+      <div class="th-fill-high"></div>
+    </div>
+    <div class="th-label-row">
+      <div class="tl">太鬆（低）</div>
+      <div class="tm">最佳區間</div>
+      <div class="tr">太緊（高）</div>
+    </div>
+    <div class="th-cases">
+      <div class="th-case low">
+        <div class="tc-val">0.0</div>
+        <div class="tc-title">門檻太低</div>
+        <div class="tc-desc">什麼都會回答，即使完全不相關，<strong>幻覺風險高</strong></div>
+      </div>
+      <div class="th-case mid">
+        <div class="tc-val">≈ 0.3</div>
+        <div class="tc-title">建議起始值</div>
+        <div class="tc-desc">過濾明顯不相關的結果，保留合理召回率，視資料調整</div>
+      </div>
+      <div class="th-case high">
+        <div class="tc-val">0.8+</div>
+        <div class="tc-title">門檻太高</div>
+        <div class="tc-desc">幾乎什麼都答「找不到資料」，<strong>召回率過低</strong></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 核心觀念 -->
+  <div class="sec"><div class="bar"></div><h2>💡 從這次實作學到的核心觀念</h2></div>
+  <div class="golden">
+    <strong>RAG 的本質就三步：</strong>把資料放到向量空間 → 用相似度找出最像的片段 → 讓 LLM 放大並生成回答。框架只是讓這三步更方便，核心邏輯不變。
+  </div>
+  <div class="golden">
+    <strong>TF-IDF vs Embedding 的差異：</strong>TF-IDF 是稀疏的詞頻統計向量，Embedding 是稠密的語意向量。TF-IDF 適合快速原型驗證，正式 RAG 應使用 Embedding 模型以獲得更好的語意理解能力。
+  </div>
+  <div class="golden">
+    <strong>Threshold 的設定沒有標準答案</strong>，需根據實際資料和業務容忍度反覆實驗：太鬆有幻覺風險，太緊會拒絕太多正當問題。
+  </div>
+
+  <!-- 技術對照 -->
+  <div class="sec"><div class="bar"></div><h2>📋 土炮 RAG vs 正式 RAG 對照</h2></div>
+  <div class="tbl-wrap">
+    <table class="sum-table">
+      <thead>
+        <tr><th>環節</th><th>本次土炮實作</th><th>正式 RAG 做法</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>向量化方式</td><td><span class="chip">TF-IDF</span> 稀疏矩陣</td><td><span class="chip">Embedding Model</span> 稠密向量（語意更精準）</td></tr>
+        <tr><td>向量儲存</td><td>記憶體中的 numpy 矩陣</td><td>pgvector / Pinecone / Chroma 等向量資料庫</td></tr>
+        <tr><td>相似度計算</td><td><span class="chip">cosine_similarity</span>（自行計算）</td><td>向量資料庫內建距離運算子</td></tr>
+        <tr><td>Context 組合</td><td>手動字串拼接</td><td>LangChain / LlamaIndex 等框架管理</td></tr>
+        <tr><td>LLM 生成</td><td><span class="chip">OpenAI API</span> 直接呼叫</td><td>同，搭配 Prompt Template 管理</td></tr>
+        <tr><td>Threshold 過濾</td><td>手動設定數值</td><td>可搭配 Re-Ranking 模型動態評分</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</main>
+
+<footer>
+  整理自 <strong>張維元 ── RAG 精準搜尋實戰 01-07</strong>｜徒手實作簡化版 RAG
+</footer>
+
+</body>
+</html>
