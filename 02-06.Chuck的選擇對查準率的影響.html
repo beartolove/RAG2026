@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chunk 的選擇對查準率的影響 — 查準率 × 查全率的核心取捨</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --navy:       #1a2332;
+      --navy-mid:   #22304a;
+      --navy-dark:  #0d1824;
+      --teal:       #2d8b8b;
+      --teal-light: #3aabab;
+      --seafoam:    #a8dadc;
+      --cream:      #f1faee;
+      --white:      #ffffff;
+      --amber:      #e8a14a;
+      --green:      #6bcb77;
+      --red:        #e06c75;
+      --purple:     #b39ddb;
+    }
+    body { font-family: 'Noto Sans TC', sans-serif; background: var(--navy); color: var(--cream); line-height: 1.7; }
+
+    /* ── HERO ── */
+    header {
+      background: linear-gradient(135deg, #0d1824 0%, var(--navy-mid) 55%, #193e3e 100%);
+      padding: 64px 40px 52px; text-align: center; position: relative; overflow: hidden;
+    }
+    header::before {
+      content: ''; position: absolute; inset: 0;
+      background:
+        radial-gradient(ellipse 55% 45% at 15% 85%, rgba(45,139,139,.2) 0%, transparent 65%),
+        radial-gradient(ellipse 45% 55% at 85% 15%, rgba(168,218,220,.1) 0%, transparent 65%);
+    }
+    .badge { display: inline-block; background: rgba(45,139,139,.25); border: 1px solid var(--teal); color: var(--seafoam); font-size: .72rem; font-weight: 700; letter-spacing: .14em; padding: 5px 16px; border-radius: 20px; margin-bottom: 18px; position: relative; }
+    header h1 { font-size: clamp(1.7rem, 4vw, 2.75rem); font-weight: 900; color: var(--white); line-height: 1.25; position: relative; margin-bottom: 14px; }
+    header h1 span { color: var(--seafoam); }
+    header p.subtitle { font-size: .94rem; color: rgba(241,250,238,.6); max-width: 580px; margin: 0 auto; position: relative; }
+
+    main { max-width: 980px; margin: 0 auto; padding: 52px 24px 80px; }
+
+    /* ── SECTION ── */
+    .sec { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; margin-top: 52px; }
+    .sec:first-child { margin-top: 0; }
+    .sec .bar { width: 4px; height: 26px; background: linear-gradient(180deg, var(--teal), var(--seafoam)); border-radius: 2px; flex-shrink: 0; }
+    .sec h2 { font-size: 1.2rem; font-weight: 700; color: var(--seafoam); letter-spacing: .04em; }
+
+    /* ── INTRO ── */
+    .intro { background: linear-gradient(135deg, var(--navy-mid), #1d3a3a); border: 1px solid rgba(45,139,139,.4); border-radius: 16px; padding: 26px 32px; font-size: .95rem; color: rgba(241,250,238,.82); }
+    .intro strong { color: var(--seafoam); }
+
+    /* ── PRECISION RECALL BALANCE ── */
+    .balance-wrap {
+      background: var(--navy-mid); border: 1px solid rgba(45,139,139,.25); border-radius: 16px; padding: 28px;
+    }
+    .balance-title { font-size: .78rem; font-weight: 700; color: var(--teal-light); letter-spacing: .1em; text-align: center; margin-bottom: 20px; }
+    .balance-row { display: grid; grid-template-columns: 1fr 80px 1fr; gap: 0; align-items: stretch; }
+    @media(max-width:620px){ .balance-row { grid-template-columns: 1fr; } }
+    .bal-card { border-radius: 12px; padding: 22px 20px; }
+    .bal-small { background: rgba(224,108,117,.07); border: 1px solid rgba(224,108,117,.3); }
+    .bal-large { background: rgba(232,161,74,.07);  border: 1px solid rgba(232,161,74,.3); }
+    .bal-card .bc-icon { font-size: 2rem; margin-bottom: 8px; }
+    .bal-card .bc-title { font-size: .95rem; font-weight: 700; margin-bottom: 10px; }
+    .bal-small .bc-title { color: var(--red); }
+    .bal-large .bc-title { color: var(--amber); }
+    .bal-card ul { list-style: none; }
+    .bal-card ul li { font-size: .84rem; color: rgba(241,250,238,.7); padding: 4px 0 4px 16px; position: relative; }
+    .bal-small ul li::before { content: '✓'; position: absolute; left: 0; color: var(--green); font-size: .8rem; }
+    .bal-large ul li::before { content: '✓'; position: absolute; left: 0; color: var(--green); font-size: .8rem; }
+    .bal-card ul li.minus::before { content: '✗'; color: var(--red); }
+    .bal-vs { display: flex; align-items: center; justify-content: center; font-size: 1.4rem; color: rgba(45,139,139,.4); font-weight: 900; }
+    @media(max-width:620px){ .bal-vs { padding: 8px 0; } }
+
+    /* ── SLIDER VIZ ── */
+    .slider-wrap {
+      background: var(--navy-dark); border-radius: 12px; padding: 24px 28px; margin-top: 20px;
+    }
+    .sl-label { font-size: .75rem; font-weight: 700; color: rgba(241,250,238,.45); letter-spacing: .08em; margin-bottom: 10px; }
+    .sl-track { position: relative; height: 14px; background: rgba(255,255,255,.06); border-radius: 7px; overflow: hidden; margin-bottom: 6px; }
+    .sl-precision { position: absolute; left: 0; height: 100%; border-radius: 7px 0 0 7px; background: linear-gradient(90deg, rgba(107,203,119,.8), rgba(45,139,139,.4)); }
+    .sl-recall    { position: absolute; right: 0; height: 100%; border-radius: 0 7px 7px 0; background: linear-gradient(270deg, rgba(232,161,74,.8), rgba(45,139,139,.4)); }
+    .sl-indicator { position: absolute; top: -4px; width: 22px; height: 22px; border-radius: 50%; border: 3px solid var(--white); background: var(--teal); transform: translateX(-50%); cursor: pointer; }
+    .sl-row { display: flex; justify-content: space-between; font-size: .74rem; }
+    .sl-row .sl-left  { color: var(--green); }
+    .sl-row .sl-right { color: var(--amber); }
+    .sl-sweet { text-align: center; margin-top: 10px; font-size: .82rem; color: var(--seafoam); font-weight: 600; }
+
+    /* ── RECOMMENDED SIZES TABLE ── */
+    .rec-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+    .rec-card {
+      background: var(--navy-mid); border: 1px solid rgba(45,139,139,.22); border-radius: 14px;
+      padding: 22px 22px; transition: border-color .2s;
+    }
+    .rec-card:hover { border-color: var(--teal); }
+    .rec-card .rc-type { font-size: .7rem; font-weight: 700; color: var(--teal-light); letter-spacing: .1em; margin-bottom: 8px; }
+    .rec-card .rc-icon { font-size: 1.8rem; margin-bottom: 8px; }
+    .rec-card h3 { font-size: .97rem; font-weight: 700; color: var(--white); margin-bottom: 6px; }
+    .rec-card .rc-range {
+      font-family: 'JetBrains Mono', monospace; font-size: 1.2rem; font-weight: 700;
+      color: var(--seafoam); margin: 10px 0;
+    }
+    .rec-card p { font-size: .84rem; color: rgba(241,250,238,.65); }
+    .rec-card .rc-why { font-size: .79rem; color: var(--teal-light); margin-top: 8px; }
+
+    /* ── OVERLAP ZONE ── */
+    .overlap-zones { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+    @media(max-width:620px){ .overlap-zones { grid-template-columns: 1fr; } }
+    .ov-zone { border-radius: 12px; padding: 18px 18px; text-align: center; }
+    .ov-zone.low  { background: rgba(232,161,74,.07);  border: 1px solid rgba(232,161,74,.3); }
+    .ov-zone.good { background: rgba(45,139,139,.1);   border: 2px solid rgba(45,139,139,.5); }
+    .ov-zone.high { background: rgba(224,108,117,.07); border: 1px solid rgba(224,108,117,.3); }
+    .ov-zone .oz-pct { font-family: 'JetBrains Mono', monospace; font-size: 1.5rem; font-weight: 700; margin-bottom: 6px; }
+    .ov-zone.low  .oz-pct { color: var(--amber); }
+    .ov-zone.good .oz-pct { color: var(--seafoam); }
+    .ov-zone.high .oz-pct { color: var(--red); }
+    .ov-zone .oz-label { font-size: .82rem; font-weight: 700; color: var(--white); margin-bottom: 6px; }
+    .ov-zone .oz-desc  { font-size: .78rem; color: rgba(241,250,238,.65); }
+    .ov-problem {
+      background: rgba(224,108,117,.07); border: 1px solid rgba(224,108,117,.3);
+      border-left: 4px solid var(--red); border-radius: 0 12px 12px 0;
+      padding: 16px 22px; font-size: .87rem; color: rgba(241,250,238,.8); margin-top: 14px;
+    }
+    .ov-problem strong { color: #e06c75; }
+
+    /* ── CONTEXT BREAK ── */
+    .ctx-demo {
+      background: var(--navy-dark); border: 1px solid rgba(45,139,139,.2); border-radius: 12px;
+      padding: 20px 24px;
+    }
+    .ctx-demo .cd-label { font-size: .7rem; font-weight: 700; letter-spacing: .1em; margin-bottom: 12px; }
+    .ctx-blocks { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px; }
+    .cb { border-radius: 5px; padding: 5px 10px; font-size: .78rem; font-family: 'JetBrains Mono', monospace; }
+    .cb-a  { background: rgba(107,203,119,.15); border: 1px solid rgba(107,203,119,.4); color: #a5d6a7; }
+    .cb-b  { background: rgba(45,139,139,.2);   border: 1px solid rgba(45,139,139,.5);  color: var(--seafoam); }
+    .cb-c  { background: rgba(179,157,219,.15); border: 1px solid rgba(179,157,219,.4); color: var(--purple); }
+    .cb-ref{ background: rgba(232,161,74,.15);  border: 1px solid rgba(232,161,74,.4);  color: var(--amber); font-style: italic; }
+    .cb-cut{ background: rgba(224,108,117,.15); border: 1px dashed rgba(224,108,117,.5); color: var(--red); }
+    .cd-note { font-size: .8rem; color: rgba(241,250,238,.6); }
+    .cd-note span { color: var(--red); font-weight: 700; }
+
+    /* ── LATE CHUNKING ── */
+    .compare-method {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+    }
+    @media(max-width:620px){ .compare-method { grid-template-columns: 1fr; } }
+    .cm-card { background: var(--navy-mid); border: 1px solid rgba(45,139,139,.22); border-radius: 14px; overflow: hidden; }
+    .cm-header { padding: 14px 20px; font-size: .8rem; font-weight: 700; letter-spacing: .08em; }
+    .cm-card.trad .cm-header { background: rgba(224,108,117,.12); color: var(--red); border-bottom: 1px solid rgba(224,108,117,.2); }
+    .cm-card.late .cm-header { background: rgba(45,139,139,.15);  color: var(--teal-light); border-bottom: 1px solid rgba(45,139,139,.2); }
+    .cm-body { padding: 18px 20px; }
+    .cm-flow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+    .cm-step {
+      background: var(--navy-dark); border: 1px solid rgba(45,139,139,.3);
+      border-radius: 6px; padding: 5px 10px; font-size: .75rem;
+      font-family: 'JetBrains Mono', monospace; color: rgba(241,250,238,.8);
+    }
+    .cm-arrow { color: rgba(45,139,139,.6); font-size: 1rem; }
+    .cm-desc { font-size: .84rem; color: rgba(241,250,238,.68); }
+    .cm-pro  { font-size: .78rem; color: var(--green); margin-top: 8px; }
+    .cm-con  { font-size: .78rem; color: var(--amber); margin-top: 4px; }
+
+    /* ── THREE PARAMS ── */
+    .three-params { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    @media(max-width:620px){ .three-params { grid-template-columns: 1fr; } }
+    .tp-card {
+      background: var(--navy-mid); border: 1px solid rgba(45,139,139,.25);
+      border-top: 3px solid var(--teal); border-radius: 0 0 12px 12px; padding: 18px 18px;
+      text-align: center;
+    }
+    .tp-card .tp-icon { font-size: 1.8rem; margin-bottom: 8px; }
+    .tp-card .tp-name { font-family: 'JetBrains Mono', monospace; font-size: .82rem; font-weight: 600; color: var(--seafoam); margin-bottom: 6px; }
+    .tp-card .tp-desc { font-size: .82rem; color: rgba(241,250,238,.65); }
+
+    /* ── GOLDEN / WARNING ── */
+    .golden { background: rgba(45,139,139,.1); border-left: 4px solid var(--teal); border-radius: 0 12px 12px 0; padding: 18px 26px; font-size: .93rem; color: rgba(241,250,238,.85); margin-bottom: 12px; }
+    .golden strong { color: var(--seafoam); }
+    .warn-box { background: rgba(232,161,74,.08); border-left: 4px solid var(--amber); border-radius: 0 12px 12px 0; padding: 16px 22px; font-size: .88rem; color: rgba(241,250,238,.8); margin-bottom: 12px; }
+    .warn-box strong { color: var(--amber); }
+
+    /* ── SUMMARY TABLE ── */
+    .tbl-wrap { overflow-x: auto; border-radius: 12px; border: 1px solid rgba(45,139,139,.25); }
+    .sum-table { width: 100%; border-collapse: collapse; }
+    .sum-table th { background: rgba(45,139,139,.25); color: var(--seafoam); font-size: .8rem; font-weight: 700; letter-spacing: .05em; padding: 11px 16px; text-align: left; border-bottom: 2px solid var(--teal); }
+    .sum-table td { padding: 11px 16px; font-size: .855rem; color: rgba(241,250,238,.78); border-bottom: 1px solid rgba(45,139,139,.15); vertical-align: top; }
+    .sum-table tr:last-child td { border-bottom: none; }
+    .sum-table tr:nth-child(odd) td { background: rgba(255,255,255,.025); }
+    .chip { display: inline-block; background: rgba(45,139,139,.2); border: 1px solid rgba(45,139,139,.4); color: var(--seafoam); font-size: .75rem; font-weight: 600; border-radius: 6px; padding: 2px 9px; font-family: 'JetBrains Mono', monospace; }
+
+    footer { text-align: center; padding: 30px 24px; border-top: 1px solid rgba(45,139,139,.2); font-size: .78rem; color: rgba(241,250,238,.3); }
+    footer strong { color: var(--teal-light); }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="badge">📐 調參觀念整理</div>
+  <h1>Chunk 的選擇對<span>查準率</span>的影響</h1>
+  <p class="subtitle">張維元 ── RAG 精準搜尋實戰 02-06 | Chunk Size × Overlap × Embedding Model 三參數調教，從實驗找到可用解</p>
+</header>
+
+<main>
+
+  <!-- 核心觀念 -->
+  <div class="sec"><div class="bar"></div><h2>🎯 核心觀念：Chunking 是被忽略的調參空間</h2></div>
+  <div class="intro">
+    大多數人優化 RAG 時只想到<strong>換模型、換 Embedding</strong>，卻忽略了 Chunking 本身就是一個<strong>重要的可調參數（Parameter）</strong>。<br><br>
+    Chunk 的大小、重疊比例、切分邊界，本質上都在調整<strong>查準率（Precision）與查全率（Recall）的平衡</strong>。沒有做過實驗與評估，只是在盲測。
+  </div>
+
+  <!-- 查準率 vs 查全率 -->
+  <div class="sec"><div class="bar"></div><h2>⚖️ Chunk Size 的根本取捨：查準 vs 查全</h2></div>
+  <div class="balance-wrap">
+    <div class="balance-title">CHUNK SIZE 對檢索品質的雙面影響</div>
+    <div class="balance-row">
+      <div class="bal-card bal-small">
+        <div class="bc-icon">🔬</div>
+        <div class="bc-title">Chunk 切太小</div>
+        <ul>
+          <li>語意集中，查準率高</li>
+          <li>容易精準對應到特定問題</li>
+          <li class="minus">資訊不完整，缺乏完整語境</li>
+          <li class="minus">關鍵上下文可能被切斷</li>
+          <li class="minus">LLM 拿到的片段不足以回答</li>
+        </ul>
+      </div>
+      <div class="bal-vs">VS</div>
+      <div class="bal-card bal-large">
+        <div class="bc-icon">🌊</div>
+        <div class="bc-title">Chunk 切太大</div>
+        <ul>
+          <li>上下文完整，不易誤解</li>
+          <li>保留較完整的語意單元</li>
+          <li class="minus">Embedding 後向量模糊失真</li>
+          <li class="minus">混入太多主題，重點被稀釋</li>
+          <li class="minus">檢索相似度下降，命中率低</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- 滑動示意 -->
+    <div class="slider-wrap">
+      <div class="sl-label">CHUNK SIZE 對兩個指標的影響趨勢</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:8px">
+        <div>
+          <div style="font-size:.72rem;color:var(--green);margin-bottom:4px">查準率（Precision）</div>
+          <div class="sl-track">
+            <div class="sl-precision" style="width:70%"></div>
+          </div>
+          <div style="font-size:.7rem;color:rgba(241,250,238,.4);display:flex;justify-content:space-between">
+            <span>小 Chunk → 高</span><span>大 Chunk → 低</span>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:.72rem;color:var(--amber);margin-bottom:4px">查全率（Recall / 上下文完整性）</div>
+          <div class="sl-track">
+            <div class="sl-recall" style="width:70%"></div>
+          </div>
+          <div style="font-size:.7rem;color:rgba(241,250,238,.4);display:flex;justify-content:space-between">
+            <span>小 Chunk → 低</span><span>大 Chunk → 高</span>
+          </div>
+        </div>
+      </div>
+      <div class="sl-sweet">⚡ 最佳 Chunk Size：讓每個 Chunk 對應一個獨立主題，查準率與上下文完整性同時最大化</div>
+    </div>
+  </div>
+
+  <!-- 各場景建議大小 -->
+  <div class="sec"><div class="bar"></div><h2>📏 依文件類型的 Chunk Size 建議值</h2></div>
+  <div class="rec-grid">
+    <div class="rec-card">
+      <div class="rc-type">SCENARIO 01</div>
+      <div class="rc-icon">❓</div>
+      <h3>FAQ 問答文件</h3>
+      <div class="rc-range">300 – 500 Tokens</div>
+      <p>每個 FAQ 條目通常只有一問一答，語意單元本身短小精悍，3～4 句話大致就能涵蓋一個完整知識點。</p>
+      <div class="rc-why">💡 使用者懶得看長文，FAQ 本來就是濃縮過的資訊</div>
+    </div>
+    <div class="rec-card">
+      <div class="rc-type">SCENARIO 02</div>
+      <div class="rc-icon">📘</div>
+      <h3>技術文件 / API 說明</h3>
+      <div class="rc-range">800 – 1000 Tokens</div>
+      <p>包含 API 說明、參數定義、範例程式碼，語意單元較長，需要保留完整的說明脈絡與前後依賴關係。</p>
+      <div class="rc-why">💡 切太小會把 API 說明和範例程式切斷，導致 LLM 無法理解完整用法</div>
+    </div>
+    <div class="rec-card">
+      <div class="rc-type">SCENARIO 03</div>
+      <div class="rc-icon">📄</div>
+      <h3>一般文章 / 報告</h3>
+      <div class="rc-range">500 – 800 Tokens</div>
+      <p>段落結構較清晰，以自然段落為切割邊界效果最好。可搭配 RecursiveCharacterTextSplitter 依換行符切割。</p>
+      <div class="rc-why">💡 中文段落通常以換行或句號為自然邊界，優先利用這些斷點</div>
+    </div>
+  </div>
+
+  <!-- Overlap 最佳區間 -->
+  <div class="sec"><div class="bar"></div><h2>🔗 Chunk Overlap 的建議區間</h2></div>
+  <div class="overlap-zones">
+    <div class="ov-zone low">
+      <div class="oz-pct">5%</div>
+      <div class="oz-label">文本乾淨時可用</div>
+      <div class="oz-desc">文字結構清晰、段落完整，語意邊界自然，不需太多重疊</div>
+    </div>
+    <div class="ov-zone good">
+      <div class="oz-pct">10 – 20%</div>
+      <div class="oz-label">✅ 一般建議區間</div>
+      <div class="oz-desc">適合多數場景，既能保留邊界上下文，又不會造成大量重複內容</div>
+    </div>
+    <div class="ov-zone high">
+      <div class="oz-pct">&gt; 25%</div>
+      <div class="oz-label">不建議超過</div>
+      <div class="oz-desc">相鄰 Chunk 出現大量重複文字，導致向量污染，浪費上下文空間</div>
+    </div>
+  </div>
+
+  <div class="ov-problem">
+    <strong>⚠ 向量污染（Vector Contamination）：</strong>Overlap 設太大（如 50%）時，幾乎每個 Chunk 都含有相同的文字，向量空間中大量重複向量會干擾相似度計算，Top-K 結果全是近似相同的 Chunk，<strong>白白浪費了 LLM 的上下文視窗</strong>。
+  </div>
+
+  <!-- 上下文斷裂問題 -->
+  <div class="sec"><div class="bar"></div><h2>⚡ 常見問題：上下文斷裂（Context Breakage）</h2></div>
+  <div class="ctx-demo">
+    <div class="cd-label" style="color:var(--teal-light)">PROBLEM — 代名詞跨 Chunk 斷裂示意</div>
+    <div class="chunk-label" style="font-size:.7rem;color:rgba(241,250,238,.4);letter-spacing:.06em;margin-bottom:6px">Chunk A</div>
+    <div class="ctx-blocks">
+      <span class="cb cb-a">台灣的珍珠奶茶</span>
+      <span class="cb cb-a">起源於 1980 年代</span>
+      <span class="cb cb-a">由台南的茶飲店首創</span>
+    </div>
+    <div class="chunk-label" style="font-size:.7rem;color:rgba(241,250,238,.4);letter-spacing:.06em;margin-bottom:6px;margin-top:8px">Chunk B</div>
+    <div class="ctx-blocks">
+      <span class="cb cb-ref">它</span>
+      <span class="cb cb-b">後來傳播到全台灣</span>
+      <span class="cb cb-b">並在 2000 年後</span>
+      <span class="cb cb-b">開始向海外擴展</span>
+    </div>
+    <div class="cd-note" style="margin-top:12px">
+      「<span>它</span>」指的是 Chunk A 中的「珍珠奶茶」，但被切入 Chunk B 後，LLM 在只讀 Chunk B 的情況下<span>無法解析代名詞的指涉</span>，導致語意斷裂。Overlap 只能緩解相鄰兩句的斷裂，<strong>跨越多句的代名詞參照難以靠 Overlap 解決</strong>。
+    </div>
+  </div>
+
+  <!-- Late Chunking -->
+  <div class="sec"><div class="bar"></div><h2>🚀 進階技術：Late Chunking（延遲分塊）</h2></div>
+  <div class="compare-method">
+    <div class="cm-card trad">
+      <div class="cm-header">❌ 傳統做法：先切再看</div>
+      <div class="cm-body">
+        <div class="cm-flow">
+          <div class="cm-step">原始文件</div>
+          <div class="cm-arrow">→</div>
+          <div class="cm-step">切 Chunk</div>
+          <div class="cm-arrow">→</div>
+          <div class="cm-step">Embedding</div>
+          <div class="cm-arrow">→</div>
+          <div class="cm-step">存入向量庫</div>
+        </div>
+        <div class="cm-desc">每個 Chunk 被獨立 Embedding，<strong>模型只看得到局部片段</strong>，缺乏全局語意脈絡，容易造成代名詞指涉不明、主題語意被截斷。</div>
+        <div class="cm-con">⚠ Chunk 只含局部語意，向量品質受切割位置影響</div>
+      </div>
+    </div>
+    <div class="cm-card late">
+      <div class="cm-header">✅ Late Chunking（Jina AI 提出）：先看再切</div>
+      <div class="cm-body">
+        <div class="cm-flow">
+          <div class="cm-step">原始文件</div>
+          <div class="cm-arrow">→</div>
+          <div class="cm-step">全文 Embedding</div>
+          <div class="cm-arrow">→</div>
+          <div class="cm-step">再切 Chunk</div>
+          <div class="cm-arrow">→</div>
+          <div class="cm-step">區塊向量化</div>
+        </div>
+        <div class="cm-desc">先對全文進行 Token 級別 Embedding，讓模型<strong>讀到整篇文件的上下文</strong>後，再進行分段，每個 Chunk 的向量都含有全局語意資訊。</div>
+        <div class="cm-pro">✓ 保留全局語意，代名詞指涉更準確</div>
+        <div class="cm-con">⚠ 每個 Chunk 都含全局資訊，資訊密度較高，是一種取捨；建議在其他方法效果不佳時再嘗試</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 三個互動參數 -->
+  <div class="sec"><div class="bar"></div><h2>🔧 三個必須一起調的核心參數</h2></div>
+  <div class="three-params">
+    <div class="tp-card">
+      <div class="tp-icon">✂️</div>
+      <div class="tp-name">Chunk Size</div>
+      <div class="tp-desc">決定每段資料涵蓋多少內容，直接影響查準率與上下文完整性的平衡</div>
+    </div>
+    <div class="tp-card">
+      <div class="tp-icon">🔗</div>
+      <div class="tp-name">Chunk Overlap</div>
+      <div class="tp-desc">控制相鄰 Chunk 的重疊量，避免語意斷裂，但過大會造成向量污染</div>
+    </div>
+    <div class="tp-card">
+      <div class="tp-icon">🧠</div>
+      <div class="tp-name">Embedding Model</div>
+      <div class="tp-desc">決定語意理解能力與向量空間品質。不同模型對技術文件或自然語言的敏感度不同</div>
+    </div>
+  </div>
+  <div style="background:var(--navy-mid);border:1px solid rgba(45,139,139,.25);border-radius:12px;padding:18px 22px;margin-top:14px;font-size:.88rem;color:rgba(241,250,238,.75);text-align:center">
+    這三個參數<strong style="color:var(--seafoam)">彼此互相影響</strong>，必須同時考量、反覆實驗，不能單獨調其中一個就認為最佳化完成。
+  </div>
+
+  <!-- 核心觀念金句 -->
+  <div class="sec"><div class="bar"></div><h2>💡 核心觀念</h2></div>
+  <div class="golden">
+    <strong>Chunking 沒有最佳解，只有透過實驗找到「可行解」。</strong>沒有任何公式能直接算出最佳 Chunk Size，唯有針對你的資料、你的查詢類型，設計實驗並量化評估，才能找到適合的參數組合。
+  </div>
+  <div class="warn-box">
+    <strong>沒有評估就是盲測。</strong>如果只是憑感覺設定 Chunk Size，而不去測量查準率與查全率的實際變化，那你只是在盲測，而不是在工程意義上的優化。
+  </div>
+  <div class="golden">
+    <strong>Embedding 決定語意理解能力，Chunking 決定語意保留品質。</strong>同樣的 Chunk，在不同的 Embedding 模型下，會產生完全不同的向量空間——這也是為什麼兩者必須一起考量與調教。
+  </div>
+
+  <!-- 快速參考總表 -->
+  <div class="sec"><div class="bar"></div><h2>📋 Chunk 調參快速參考總表</h2></div>
+  <div class="tbl-wrap">
+    <table class="sum-table">
+      <thead>
+        <tr><th>參數</th><th>過小的問題</th><th>建議區間</th><th>過大的問題</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="chip">Chunk Size</span></td>
+          <td>資訊不完整，上下文被切斷</td>
+          <td>FAQ：300–500 Token<br>技術文件：800–1000 Token</td>
+          <td>向量語意模糊失真，重點稀釋</td>
+        </tr>
+        <tr>
+          <td><span class="chip">Chunk Overlap</span></td>
+          <td>邊界語意斷裂，代名詞指涉不明</td>
+          <td>一般：10–20%<br>乾淨文本：5%<br>上限：25%</td>
+          <td>向量污染，Top-K 全取到重複 Chunk</td>
+        </tr>
+        <tr>
+          <td><span class="chip">Embedding Model</span></td>
+          <td colspan="3" style="text-align:center">視資料類型選擇：技術文件敏感型 vs 自然語言理解型，需實驗比較</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="tbl-wrap" style="margin-top:14px">
+    <table class="sum-table">
+      <thead>
+        <tr><th>技術</th><th>適用時機</th><th>核心優點</th><th>注意事項</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="chip">傳統 Chunking</span></td>
+          <td>多數場景的預設選擇</td>
+          <td>簡單、可控、低成本</td>
+          <td>邊界切割依賴 Overlap 補救</td>
+        </tr>
+        <tr>
+          <td><span class="chip">Late Chunking</span></td>
+          <td>傳統方法效果不佳時嘗試</td>
+          <td>保留全局語意，解決代名詞斷裂</td>
+          <td>每個 Chunk 含全局資訊，是一種取捨</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+</main>
+
+<footer>
+  整理自 <strong>張維元 ── RAG 精準搜尋實戰 02-06</strong>｜Chunk 的選擇對查準率的影響
+</footer>
+
+</body>
+</html>
