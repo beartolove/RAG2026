@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>向量資料庫的選擇與配置 — RAG 系統的長期記憶引擎</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --navy:       #1a2332;
+      --navy-mid:   #22304a;
+      --navy-dark:  #0d1824;
+      --teal:       #2d8b8b;
+      --teal-light: #3aabab;
+      --seafoam:    #a8dadc;
+      --cream:      #f1faee;
+      --white:      #ffffff;
+      --amber:      #e8a14a;
+      --green:      #6bcb77;
+      --red:        #e06c75;
+      --purple:     #b39ddb;
+    }
+    body { font-family: 'Noto Sans TC', sans-serif; background: var(--navy); color: var(--cream); line-height: 1.7; }
+
+    /* ── HERO ── */
+    header {
+      background: linear-gradient(135deg, #0d1824 0%, var(--navy-mid) 55%, #193e3e 100%);
+      padding: 64px 40px 52px; text-align: center; position: relative; overflow: hidden;
+    }
+    header::before {
+      content: ''; position: absolute; inset: 0;
+      background:
+        radial-gradient(ellipse 55% 45% at 15% 85%, rgba(45,139,139,.22) 0%, transparent 65%),
+        radial-gradient(ellipse 45% 55% at 85% 15%, rgba(168,218,220,.11) 0%, transparent 65%);
+    }
+    .badge { display: inline-block; background: rgba(45,139,139,.25); border: 1px solid var(--teal); color: var(--seafoam); font-size: .72rem; font-weight: 700; letter-spacing: .14em; padding: 5px 16px; border-radius: 20px; margin-bottom: 18px; position: relative; }
+    header h1 { font-size: clamp(1.7rem,4vw,2.75rem); font-weight: 900; color: var(--white); line-height: 1.25; position: relative; margin-bottom: 14px; }
+    header h1 span { color: var(--seafoam); }
+    header p.subtitle { font-size: .94rem; color: rgba(241,250,238,.6); max-width: 600px; margin: 0 auto; position: relative; }
+
+    main { max-width: 980px; margin: 0 auto; padding: 52px 24px 80px; }
+
+    /* ── SECTION ── */
+    .sec { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; margin-top: 52px; }
+    .sec:first-child { margin-top: 0; }
+    .sec .bar { width: 4px; height: 26px; background: linear-gradient(180deg, var(--teal), var(--seafoam)); border-radius: 2px; flex-shrink: 0; }
+    .sec h2 { font-size: 1.2rem; font-weight: 700; color: var(--seafoam); letter-spacing: .04em; }
+
+    /* ── INTRO ── */
+    .intro { background: linear-gradient(135deg, var(--navy-mid), #1d3a3a); border: 1px solid rgba(45,139,139,.4); border-radius: 16px; padding: 26px 32px; font-size: .95rem; color: rgba(241,250,238,.82); }
+    .intro strong { color: var(--seafoam); }
+
+    /* ── BRAIN ANALOGY ── */
+    .brain-card {
+      display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px;
+    }
+    @media(max-width:640px){ .brain-card { grid-template-columns: 1fr; } }
+    .bc-item {
+      background: var(--navy-mid); border: 1px solid rgba(45,139,139,.22);
+      border-radius: 14px; padding: 22px 20px; text-align: center;
+      transition: border-color .2s;
+    }
+    .bc-item:hover { border-color: var(--teal); }
+    .bc-item .bi-icon { font-size: 2rem; margin-bottom: 8px; }
+    .bc-item .bi-label { font-size: .7rem; font-weight: 700; letter-spacing: .1em; color: var(--teal-light); margin-bottom: 6px; }
+    .bc-item h4 { font-size: .95rem; font-weight: 700; color: var(--white); margin-bottom: 6px; }
+    .bc-item p  { font-size: .83rem; color: rgba(241,250,238,.65); }
+    .bc-item.highlight { border-color: var(--teal); background: rgba(45,139,139,.1); }
+    .bc-item.highlight .bi-label { color: var(--seafoam); }
+
+    /* ── DATA PIPELINE ── */
+    .pipeline {
+      background: var(--navy-dark); border: 1px solid rgba(45,139,139,.2);
+      border-radius: 14px; padding: 24px 20px;
+      display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 0;
+    }
+    .pl-node {
+      background: var(--navy-mid); border: 1px solid rgba(45,139,139,.35);
+      border-radius: 10px; padding: 10px 16px; text-align: center; min-width: 96px;
+    }
+    .pl-node .pn-icon { font-size: 1.2rem; margin-bottom: 3px; }
+    .pl-node .pn-label { font-size: .68rem; color: var(--teal-light); font-weight: 700; letter-spacing: .05em; margin-bottom: 2px; }
+    .pl-node .pn-desc  { font-size: .74rem; color: rgba(241,250,238,.6); }
+    .pl-node.active { border-color: var(--seafoam); background: rgba(45,139,139,.15); }
+    .pl-node.active .pn-label { color: var(--seafoam); }
+    .pl-arrow { color: var(--teal); font-size: 1.3rem; padding: 0 5px; align-self: center; }
+
+    /* ── DB COMPARE ── */
+    .db-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media(max-width:640px){ .db-grid { grid-template-columns: 1fr; } }
+    .db-card {
+      background: var(--navy-mid); border: 1px solid rgba(45,139,139,.22);
+      border-radius: 14px; overflow: hidden;
+    }
+    .db-card .dbc-header { padding: 14px 20px; font-size: .78rem; font-weight: 700; letter-spacing: .08em; border-bottom: 1px solid rgba(45,139,139,.15); }
+    .db-card.rds .dbc-header  { background: rgba(179,157,219,.1); color: var(--purple); }
+    .db-card.nosql .dbc-header{ background: rgba(45,139,139,.12); color: var(--teal-light); }
+    .db-card.vector .dbc-header{ background: rgba(168,218,220,.1); color: var(--seafoam); grid-column: 1 / -1; }
+    .db-card .dbc-body { padding: 18px 20px; }
+    .db-card .dbc-body p { font-size: .86rem; color: rgba(241,250,238,.72); margin-bottom: 8px; }
+    .db-card .dbc-body p:last-child { margin-bottom: 0; }
+    .db-card .dbc-body ul { list-style: none; }
+    .db-card .dbc-body ul li { font-size: .84rem; color: rgba(241,250,238,.68); padding: 3px 0 3px 16px; position: relative; }
+    .db-card .dbc-body ul li::before { content: '·'; position: absolute; left: 4px; color: var(--teal-light); font-size: 1.1rem; line-height: 1.4; }
+    .db-vector-full { grid-column: 1 / -1; background: rgba(45,139,139,.08); border: 1px solid rgba(45,139,139,.35); border-radius: 14px; overflow: hidden; }
+    .db-vector-full .dbc-header { background: rgba(45,139,139,.18); color: var(--seafoam); border-bottom: 1px solid rgba(45,139,139,.25); }
+
+    /* ── INDEX TYPES ── */
+    .index-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+    .idx-card {
+      background: var(--navy-mid); border-radius: 14px; overflow: hidden;
+      border: 1px solid rgba(45,139,139,.22); transition: border-color .2s;
+    }
+    .idx-card:hover { border-color: var(--teal); }
+    .idx-card .ic-top { padding: 16px 20px 12px; }
+    .idx-card .ic-name { font-family: 'JetBrains Mono', monospace; font-size: 1rem; font-weight: 700; margin-bottom: 4px; }
+    .idx-card .ic-sub  { font-size: .75rem; letter-spacing: .07em; font-weight: 700; margin-bottom: 10px; }
+    .idx-flat  .ic-name { color: var(--purple); }
+    .idx-ivf   .ic-name { color: var(--teal-light); }
+    .idx-hnsw  .ic-name { color: var(--seafoam); }
+    .idx-flat  .ic-sub  { color: rgba(179,157,219,.7); }
+    .idx-ivf   .ic-sub  { color: rgba(45,139,139,.8); }
+    .idx-hnsw  .ic-sub  { color: rgba(168,218,220,.7); }
+    .idx-card .ic-desc { font-size: .84rem; color: rgba(241,250,238,.68); padding: 0 20px 16px; }
+    .idx-card .ic-bars { padding: 0 20px 18px; display: flex; flex-direction: column; gap: 6px; }
+    .ic-bar-row { display: flex; align-items: center; gap: 8px; }
+    .ic-bar-label { font-size: .72rem; color: rgba(241,250,238,.5); width: 52px; flex-shrink: 0; }
+    .ic-bar-track { flex: 1; height: 8px; background: rgba(255,255,255,.06); border-radius: 4px; overflow: hidden; }
+    .ic-fill { height: 100%; border-radius: 4px; }
+    .fill-speed  { background: linear-gradient(90deg, var(--teal),    rgba(45,139,139,.3)); }
+    .fill-acc    { background: linear-gradient(90deg, var(--seafoam),  rgba(168,218,220,.3)); }
+    .fill-mem    { background: linear-gradient(90deg, var(--amber),   rgba(232,161,74,.3)); }
+
+    /* ── SELECTOR CARDS ── */
+    .selector { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+    .sel-card {
+      background: var(--navy-mid); border-radius: 14px; padding: 22px 22px;
+      border: 1px solid rgba(45,139,139,.22); transition: border-color .2s;
+    }
+    .sel-card:hover { border-color: var(--teal); }
+    .sel-card .sc-tier { font-size: .7rem; font-weight: 700; letter-spacing: .1em; margin-bottom: 8px; }
+    .sel-card .sc-icon { font-size: 1.8rem; margin-bottom: 8px; }
+    .sel-card h3 { font-size: 1rem; font-weight: 700; color: var(--white); margin-bottom: 8px; }
+    .sel-card p  { font-size: .86rem; color: rgba(241,250,238,.68); margin-bottom: 10px; }
+    .sel-card .sc-examples { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .sc-chip { font-family: 'JetBrains Mono', monospace; font-size: .73rem; background: rgba(45,139,139,.15); border: 1px solid rgba(45,139,139,.35); color: var(--teal-light); border-radius: 5px; padding: 2px 9px; }
+    .sc-chip.saas   { background: rgba(107,203,119,.1); border-color: rgba(107,203,119,.35); color: var(--green); }
+    .sc-chip.local  { background: rgba(168,218,220,.1); border-color: rgba(168,218,220,.35); color: var(--seafoam); }
+    .sc-chip.self   { background: rgba(232,161,74,.1);  border-color: rgba(232,161,74,.35);  color: var(--amber); }
+    .sel-card .sc-tier.t-saas  { color: var(--green);  }
+    .sel-card .sc-tier.t-local { color: var(--seafoam); }
+    .sel-card .sc-tier.t-self  { color: var(--amber);  }
+    .sel-card .sc-pro  { font-size: .78rem; color: var(--green);  margin-top: 8px; }
+    .sel-card .sc-con  { font-size: .78rem; color: var(--amber);  margin-top: 4px; }
+
+    /* ── TRADEOFF ── */
+    .tradeoff { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    @media(max-width:620px){ .tradeoff { grid-template-columns: 1fr; } }
+    .tf-card { background: var(--navy-mid); border: 1px solid rgba(45,139,139,.2); border-radius: 12px; padding: 18px 18px; text-align: center; }
+    .tf-card .tf-icon { font-size: 1.8rem; margin-bottom: 6px; }
+    .tf-card .tf-label { font-size: .7rem; font-weight: 700; letter-spacing: .1em; color: var(--teal-light); margin-bottom: 6px; }
+    .tf-card h4 { font-size: .92rem; font-weight: 700; color: var(--white); margin-bottom: 6px; }
+    .tf-card p  { font-size: .82rem; color: rgba(241,250,238,.62); }
+
+    /* ── GOLDEN ── */
+    .golden { background: rgba(45,139,139,.1); border-left: 4px solid var(--teal); border-radius: 0 12px 12px 0; padding: 18px 26px; font-size: .93rem; color: rgba(241,250,238,.85); margin-bottom: 12px; }
+    .golden strong { color: var(--seafoam); }
+    .warn-box { background: rgba(232,161,74,.08); border-left: 4px solid var(--amber); border-radius: 0 12px 12px 0; padding: 16px 22px; font-size: .88rem; color: rgba(241,250,238,.8); margin-bottom: 12px; }
+    .warn-box strong { color: var(--amber); }
+
+    /* ── SUMMARY TABLE ── */
+    .tbl-wrap { overflow-x: auto; border-radius: 12px; border: 1px solid rgba(45,139,139,.25); }
+    .sum-table { width: 100%; border-collapse: collapse; }
+    .sum-table th { background: rgba(45,139,139,.25); color: var(--seafoam); font-size: .8rem; font-weight: 700; letter-spacing: .05em; padding: 11px 16px; text-align: left; border-bottom: 2px solid var(--teal); }
+    .sum-table td { padding: 11px 16px; font-size: .855rem; color: rgba(241,250,238,.78); border-bottom: 1px solid rgba(45,139,139,.15); vertical-align: top; }
+    .sum-table tr:last-child td { border-bottom: none; }
+    .sum-table tr:nth-child(odd) td { background: rgba(255,255,255,.025); }
+    .chip { display: inline-block; background: rgba(45,139,139,.2); border: 1px solid rgba(45,139,139,.4); color: var(--seafoam); font-size: .75rem; font-weight: 600; border-radius: 6px; padding: 2px 9px; font-family: 'JetBrains Mono', monospace; }
+
+    footer { text-align: center; padding: 30px 24px; border-top: 1px solid rgba(45,139,139,.2); font-size: .78rem; color: rgba(241,250,238,.3); }
+    footer strong { color: var(--teal-light); }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="badge">🗄️ 系統架構單元整理</div>
+  <h1>向量資料庫的<span>選擇與配置</span></h1>
+  <p class="subtitle">張維元 ── RAG 精準搜尋實戰 03-01 | 向量資料庫不只是儲存工具，而是 RAG 系統的搜尋引擎與長期記憶</p>
+</header>
+
+<main>
+
+  <!-- 核心定位 -->
+  <div class="sec"><div class="bar"></div><h2>🎯 核心觀念：向量資料庫 ≠ 只是儲存工具</h2></div>
+  <div class="intro">
+    大多數人把向量資料庫只當成「存 Embedding 的地方」，但這只是工具層面的理解。<strong>真正的重點在於檢索</strong>——向量資料庫更像是一個<strong>搜尋引擎</strong>，它透過索引結構，讓 RAG 系統能快速從大量向量中找到最相似的結果，<strong>不需要一筆一筆精準比對</strong>。
+  </div>
+
+  <!-- LLM 系統比喻 -->
+  <div class="sec"><div class="bar"></div><h2>🧠 把 AI 系統想像成一個機器人</h2></div>
+  <div class="brain-card">
+    <div class="bc-item">
+      <div class="bi-icon">⚡</div>
+      <div class="bi-label">FAST THINKING</div>
+      <h4>直覺型思考</h4>
+      <p>LLM 的即時生成能力，快速回應當下的查詢與對話</p>
+    </div>
+    <div class="bc-item">
+      <div class="bi-icon">🤔</div>
+      <div class="bi-label">SLOW THINKING</div>
+      <h4>慢性理性思考</h4>
+      <p>深度推理、多步驟規劃，如 Agent 的思考鏈能力</p>
+    </div>
+    <div class="bc-item highlight">
+      <div class="bi-icon">🗄️</div>
+      <div class="bi-label">MEMORY ← 向量資料庫</div>
+      <h4>長期記憶 / 檢索</h4>
+      <p>LLM 只能看當下的 Context Window，<strong>資料庫才是真正的長期記憶與查歷史的能力</strong></p>
+    </div>
+  </div>
+  <div style="background:rgba(45,139,139,.08);border:1px solid rgba(45,139,139,.22);border-radius:12px;padding:16px 22px;margin-top:14px;font-size:.88rem;color:rgba(241,250,238,.75)">
+    💡 <strong style="color:var(--seafoam)">RAG 的本質</strong>：讓 LLM 外掛上一個資料庫，賦予它長期記憶的能力。記憶不好，大腦再聰明也沒有用。
+  </div>
+
+  <!-- RAG 資料流 -->
+  <div class="sec"><div class="bar"></div><h2>🔄 RAG 完整資料流程</h2></div>
+  <div class="pipeline">
+    <div class="pl-node">
+      <div class="pn-icon">📄</div>
+      <div class="pn-label">原始資料</div>
+      <div class="pn-desc">PDF / 文字 / 多媒體</div>
+    </div>
+    <div class="pl-arrow">→</div>
+    <div class="pl-node">
+      <div class="pn-icon">✂️</div>
+      <div class="pn-label">Extract + Chunk</div>
+      <div class="pn-desc">解析與切分</div>
+    </div>
+    <div class="pl-arrow">→</div>
+    <div class="pl-node">
+      <div class="pn-icon">🔢</div>
+      <div class="pn-label">Embedding</div>
+      <div class="pn-desc">向量化編碼</div>
+    </div>
+    <div class="pl-arrow">→</div>
+    <div class="pl-node active">
+      <div class="pn-icon">🗄️</div>
+      <div class="pn-label">向量資料庫</div>
+      <div class="pn-desc">索引 + 儲存</div>
+    </div>
+    <div class="pl-arrow">→</div>
+    <div class="pl-node">
+      <div class="pn-icon">🔍</div>
+      <div class="pn-label">近似搜尋</div>
+      <div class="pn-desc">取 Top-K</div>
+    </div>
+    <div class="pl-arrow">→</div>
+    <div class="pl-node">
+      <div class="pn-icon">🤖</div>
+      <div class="pn-label">LLM 生成</div>
+      <div class="pn-desc">上下文回答</div>
+    </div>
+  </div>
+
+  <!-- 資料庫類型對比 -->
+  <div class="sec"><div class="bar"></div><h2>🗂️ 資料庫類型定位</h2></div>
+  <div class="db-grid">
+    <div class="db-card rds">
+      <div class="dbc-header">📋 RDS 關聯式資料庫</div>
+      <div class="dbc-body">
+        <p>以結構化表格（Schema）儲存資料，支援 SQL 查詢，適合精準比對與關聯查詢。</p>
+        <ul>
+          <li>MySQL、PostgreSQL</li>
+          <li>結構嚴謹，查詢高效</li>
+          <li>不適合非結構化資料</li>
+        </ul>
+      </div>
+    </div>
+    <div class="db-card nosql">
+      <div class="dbc-header">🌐 NoSQL 非關聯式資料庫</div>
+      <div class="dbc-body">
+        <p>儲存非結構化資料，格式彈性（JSON、文件、Key-Value），適合大量異質資料。</p>
+        <ul>
+          <li>MongoDB、Redis</li>
+          <li>彈性高，擴充容易</li>
+          <li>向量資料庫屬於此類</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <div class="db-vector-full" style="margin-top:14px">
+    <div class="dbc-header">🔢 向量資料庫（Vector Database）— RAG 的核心記憶體</div>
+    <div class="dbc-body">
+      <p>屬於 NoSQL 的一種，但專門儲存<strong>向量（Embedding 編碼後的結果）</strong>，並以索引結構支援<strong>近似向量搜尋（ANN）</strong>。</p>
+      <p>它是一個<strong>具有索引結構的集中儲存系統</strong>：存的不是欄位，而是向量；查的不是精準字串，而是語意相似度。只要能被 Embedding 的資料（文字、圖片、音訊），都可以存入向量資料庫供 LLM 參考。</p>
+    </div>
+  </div>
+
+  <!-- 三種索引類型 -->
+  <div class="sec"><div class="bar"></div><h2>📐 向量資料庫的索引類型</h2></div>
+  <div style="background:rgba(45,139,139,.08);border:1px solid rgba(45,139,139,.2);border-radius:12px;padding:14px 22px;margin-bottom:18px;font-size:.88rem;color:rgba(241,250,238,.75)">
+    ⚙️ <strong style="color:var(--seafoam)">Index 是向量資料庫的核心</strong>：決定了搜尋的速度、精準度以及記憶體佔用量。三者互相取捨，選擇合適的索引是配置重點。
+  </div>
+  <div class="index-cards">
+
+    <div class="idx-card idx-flat">
+      <div class="ic-top">
+        <div class="ic-name">Flat</div>
+        <div class="ic-sub">暴力全掃描</div>
+        <div class="ic-desc">逐筆計算與所有向量的距離，找到絕對最精準的結果。資料量小時適用。</div>
+      </div>
+      <div class="ic-bars">
+        <div class="ic-bar-row">
+          <div class="ic-bar-label">速度</div>
+          <div class="ic-bar-track"><div class="ic-fill fill-speed" style="width:20%"></div></div>
+        </div>
+        <div class="ic-bar-row">
+          <div class="ic-bar-label">精準度</div>
+          <div class="ic-bar-track"><div class="ic-fill fill-acc" style="width:100%"></div></div>
+        </div>
+        <div class="ic-bar-row">
+          <div class="ic-bar-label">記憶體</div>
+          <div class="ic-bar-track"><div class="ic-fill fill-mem" style="width:40%"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="idx-card idx-ivf">
+      <div class="ic-top">
+        <div class="ic-name">IVF</div>
+        <div class="ic-sub">倒排索引分群</div>
+        <div class="ic-desc">先用 K-Means 分群，查詢時只在最相近的群內搜尋，大幅加速但略犧牲精準度。</div>
+      </div>
+      <div class="ic-bars">
+        <div class="ic-bar-row">
+          <div class="ic-bar-label">速度</div>
+          <div class="ic-bar-track"><div class="ic-fill fill-speed" style="width:70%"></div></div>
+        </div>
+        <div class="ic-bar-row">
+          <div class="ic-bar-label">精準度</div>
+          <div class="ic-bar-track"><div class="ic-fill fill-acc" style="width:72%"></div></div>
+        </div>
+        <div class="ic-bar-row">
+          <div class="ic-bar-label">記憶體</div>
+          <div class="ic-bar-track"><div class="ic-fill fill-mem" style="width:55%"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="idx-card idx-hnsw">
+      <div class="ic-top">
+        <div class="ic-name">HNSW</div>
+        <div class="ic-sub">跨層分區圖結構</div>
+        <div class="ic-desc">分層導航小世界圖，速度與精準度兼顧，是多數向量資料庫的預設選擇，適合生產環境。</div>
+      </div>
+      <div class="ic-bars">
+        <div class="ic-bar-row">
+          <div class="ic-bar-label">速度</div>
+          <div class="ic-bar-track"><div class="ic-fill fill-speed" style="width:90%"></div></div>
+        </div>
+        <div class="ic-bar-row">
+          <div class="ic-bar-label">精準度</div>
+          <div class="ic-bar-track"><div class="ic-fill fill-acc" style="width:85%"></div></div>
+        </div>
+        <div class="ic-bar-row">
+          <div class="ic-bar-label">記憶體</div>
+          <div class="ic-bar-track"><div class="ic-fill fill-mem" style="width:75%"></div></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+  <div class="warn-box" style="margin-top:16px">
+    <strong>⚠ 注意：RAG 不需要 100% 精準的索引。</strong>向量搜尋的目的是「模糊語意比對」，過度精準反而失去了語意搜尋的靈活性。IVF 和 HNSW 在保留模糊搜尋能力的同時，提供更好的速度。
+  </div>
+
+  <!-- 如何選擇向量資料庫 -->
+  <div class="sec"><div class="bar"></div><h2>🛒 依需求選擇向量資料庫</h2></div>
+  <div class="selector">
+
+    <div class="sel-card">
+      <div class="sc-tier t-saas">🌐 SAAS 雲端服務</div>
+      <div class="sc-icon">☁️</div>
+      <h3>快速上線，省心省力</h3>
+      <p>不需自己維運，API 直接呼叫，適合快速驗證、小型到中型專案，或不想管基礎設施的場景。</p>
+      <div class="sc-examples">
+        <span class="sc-chip saas">Pinecone</span>
+        <span class="sc-chip saas">Weaviate Cloud</span>
+      </div>
+      <div class="sc-pro">✓ 最快上線、無維運負擔</div>
+      <div class="sc-con">⚠ 成本較高，資料在第三方</div>
+    </div>
+
+    <div class="sel-card">
+      <div class="sc-tier t-local">💻 本地端 / 輕量</div>
+      <div class="sc-icon">🖥️</div>
+      <h3>本機開發，Prototype 首選</h3>
+      <p>輕量、無需額外基礎設施，安裝即用，適合個人開發、概念驗證（POC）與小規模測試。</p>
+      <div class="sc-examples">
+        <span class="sc-chip local">ChromaDB</span>
+        <span class="sc-chip local">FAISS</span>
+      </div>
+      <div class="sc-pro">✓ 零成本，安裝簡單，本地可用</div>
+      <div class="sc-con">⚠ 不適合大規模生產環境</div>
+    </div>
+
+    <div class="sel-card">
+      <div class="sc-tier t-self">⚙️ 自架系統</div>
+      <div class="sc-icon">🏗️</div>
+      <h3>完全掌控，企業級部署</h3>
+      <p>自行架設與維運，完全掌控資料與搜尋邏輯，適合具有特殊搜尋需求的企業級應用或大規模場景。</p>
+      <div class="sc-examples">
+        <span class="sc-chip self">pgvector</span>
+        <span class="sc-chip self">Milvus</span>
+        <span class="sc-chip self">Qdrant</span>
+        <span class="sc-chip self">Redis</span>
+      </div>
+      <div class="sc-pro">✓ 最大彈性，可自訂搜尋邏輯</div>
+      <div class="sc-con">⚠ 需要工程資源維護</div>
+    </div>
+
+  </div>
+
+  <!-- 三個取捨維度 -->
+  <div class="sec"><div class="bar"></div><h2>⚖️ 選擇時的三個核心取捨維度</h2></div>
+  <div class="tradeoff">
+    <div class="tf-card">
+      <div class="tf-icon">📦</div>
+      <div class="tf-label">DATA SCALE</div>
+      <h4>資料量大小</h4>
+      <p>資料量小 → 本地端即可；中大型 → 考慮 SaaS 或自架；超大規模 → 必須自架並優化 Index</p>
+    </div>
+    <div class="tf-card">
+      <div class="tf-icon">💰</div>
+      <div class="tf-label">COST</div>
+      <h4>成本預算</h4>
+      <p>Prototype 用免費本地端；封測上線可用 SaaS；需長期控制成本則選自架方案</p>
+    </div>
+    <div class="tf-card">
+      <div class="tf-icon">⏱️</div>
+      <div class="tf-label">LATENCY</div>
+      <h4>可接受的延遲</h4>
+      <p>對回應速度要求高的場景，需選擇 HNSW 索引的資料庫，並考量網路延遲（本地 vs 雲端）</p>
+    </div>
+  </div>
+
+  <!-- 核心觀念 -->
+  <div class="sec"><div class="bar"></div><h2>💡 核心觀念</h2></div>
+  <div class="golden">
+    <strong>向量資料庫是 RAG 的長期記憶，而非只是倉庫。</strong>LLM 本身沒有長期記憶，只能看當下的 Context Window；資料庫才是讓 LLM 具備「查歷史、做搜尋」能力的關鍵組件。
+  </div>
+  <div class="golden">
+    <strong>Index 決定了向量資料庫快不快、準不準、記憶體佔多少。</strong>作為使用者，需要了解不同資料庫預設使用的索引機制，才能在精準度、速度與成本之間做出正確取捨。
+  </div>
+  <div class="golden">
+    <strong>好的向量資料庫選擇，決定了 RAG 能否快速 Scale。</strong>初期 Prototype 用本地端，封測上線用 SaaS，最終生產環境需根據資料量、延遲需求與控制需求選擇自架方案。
+  </div>
+
+  <!-- 快速選型表 -->
+  <div class="sec"><div class="bar"></div><h2>📋 向量資料庫快速選型表</h2></div>
+  <div class="tbl-wrap">
+    <table class="sum-table">
+      <thead>
+        <tr><th>資料庫</th><th>類型</th><th>適合場景</th><th>索引支援</th><th>成本</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="chip">Pinecone</span></td>
+          <td>SaaS 雲端</td>
+          <td>快速上線、中小型專案</td>
+          <td>HNSW</td>
+          <td>付費</td>
+        </tr>
+        <tr>
+          <td><span class="chip">ChromaDB</span></td>
+          <td>本地端輕量</td>
+          <td>Prototype、本機開發</td>
+          <td>HNSW</td>
+          <td>免費</td>
+        </tr>
+        <tr>
+          <td><span class="chip">pgvector</span></td>
+          <td>PostgreSQL 擴充</td>
+          <td>已有 PG 環境、系統化自架</td>
+          <td>IVF / HNSW</td>
+          <td>低（自架）</td>
+        </tr>
+        <tr>
+          <td><span class="chip">Milvus</span></td>
+          <td>自架開源</td>
+          <td>大規模生產、企業級部署</td>
+          <td>IVF / HNSW / Flat</td>
+          <td>低（自架）</td>
+        </tr>
+        <tr>
+          <td><span class="chip">Qdrant</span></td>
+          <td>自架 / 雲端</td>
+          <td>自訂搜尋能力、高效能需求</td>
+          <td>HNSW</td>
+          <td>低～中</td>
+        </tr>
+        <tr>
+          <td><span class="chip">Redis</span></td>
+          <td>自架多功能</td>
+          <td>需要向量 + 快取同時使用</td>
+          <td>HNSW</td>
+          <td>低（自架）</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+</main>
+
+<footer>
+  整理自 <strong>張維元 ── RAG 精準搜尋實戰 03-01</strong>｜向量資料庫的選擇與配置
+</footer>
+
+</body>
+</html>

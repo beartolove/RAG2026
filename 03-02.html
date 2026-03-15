@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>向量資料庫與嵌入式模型比較 — 語意品質 × 搜尋效率的分工</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --navy:       #1a2332;
+      --navy-mid:   #22304a;
+      --navy-dark:  #0d1824;
+      --teal:       #2d8b8b;
+      --teal-light: #3aabab;
+      --seafoam:    #a8dadc;
+      --cream:      #f1faee;
+      --white:      #ffffff;
+      --amber:      #e8a14a;
+      --green:      #6bcb77;
+      --red:        #e06c75;
+      --purple:     #b39ddb;
+    }
+    body { font-family: 'Noto Sans TC', sans-serif; background: var(--navy); color: var(--cream); line-height: 1.7; }
+
+    /* ── HERO ── */
+    header {
+      background: linear-gradient(135deg, #0d1824 0%, var(--navy-mid) 55%, #193e3e 100%);
+      padding: 64px 40px 52px; text-align: center; position: relative; overflow: hidden;
+    }
+    header::before {
+      content: ''; position: absolute; inset: 0;
+      background:
+        radial-gradient(ellipse 55% 45% at 15% 85%, rgba(45,139,139,.22) 0%, transparent 65%),
+        radial-gradient(ellipse 45% 55% at 85% 15%, rgba(168,218,220,.11) 0%, transparent 65%);
+    }
+    .badge { display: inline-block; background: rgba(45,139,139,.25); border: 1px solid var(--teal); color: var(--seafoam); font-size: .72rem; font-weight: 700; letter-spacing: .14em; padding: 5px 16px; border-radius: 20px; margin-bottom: 18px; position: relative; }
+    header h1 { font-size: clamp(1.7rem,4vw,2.75rem); font-weight: 900; color: var(--white); line-height: 1.25; position: relative; margin-bottom: 14px; }
+    header h1 span { color: var(--seafoam); }
+    header p.subtitle { font-size: .94rem; color: rgba(241,250,238,.6); max-width: 620px; margin: 0 auto; position: relative; }
+
+    main { max-width: 980px; margin: 0 auto; padding: 52px 24px 80px; }
+
+    .sec { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; margin-top: 52px; }
+    .sec:first-child { margin-top: 0; }
+    .sec .bar { width: 4px; height: 26px; background: linear-gradient(180deg, var(--teal), var(--seafoam)); border-radius: 2px; flex-shrink: 0; }
+    .sec h2 { font-size: 1.2rem; font-weight: 700; color: var(--seafoam); letter-spacing: .04em; }
+
+    .intro { background: linear-gradient(135deg, var(--navy-mid), #1d3a3a); border: 1px solid rgba(45,139,139,.4); border-radius: 16px; padding: 26px 32px; font-size: .95rem; color: rgba(241,250,238,.82); }
+    .intro strong { color: var(--seafoam); }
+
+    /* ── SPLIT ROLES ── */
+    .split-roles { display: grid; grid-template-columns: 1fr 60px 1fr; gap: 0; align-items: stretch; }
+    @media(max-width:640px){ .split-roles { grid-template-columns: 1fr; } }
+    .role-card { border-radius: 14px; padding: 26px 24px; }
+    .role-emb  { background: rgba(107,203,119,.07); border: 1px solid rgba(107,203,119,.35); }
+    .role-db   { background: rgba(45,139,139,.1);   border: 1px solid rgba(45,139,139,.4); }
+    .role-card .rc-icon { font-size: 2.2rem; margin-bottom: 10px; }
+    .role-card .rc-tag  { font-size: .7rem; font-weight: 700; letter-spacing: .12em; margin-bottom: 8px; }
+    .role-emb .rc-tag   { color: var(--green); }
+    .role-db  .rc-tag   { color: var(--teal-light); }
+    .role-card h3 { font-size: 1.05rem; font-weight: 700; color: var(--white); margin-bottom: 8px; }
+    .role-card .rc-def {
+      display: inline-block; font-family: 'JetBrains Mono', monospace;
+      font-size: .82rem; padding: 3px 10px; border-radius: 6px;
+      margin-bottom: 12px; font-weight: 600;
+    }
+    .role-emb .rc-def { background: rgba(107,203,119,.15); color: var(--green); }
+    .role-db  .rc-def { background: rgba(45,139,139,.2);   color: var(--seafoam); }
+    .role-card p { font-size: .875rem; color: rgba(241,250,238,.72); }
+    .role-card ul { list-style: none; margin-top: 10px; }
+    .role-card ul li { font-size: .855rem; color: rgba(241,250,238,.68); padding: 4px 0 4px 16px; position: relative; }
+    .role-card ul li::before { content: '→'; position: absolute; left: 0; color: var(--teal-light); font-size: .8rem; }
+    .role-vs { display: flex; align-items: center; justify-content: center; font-size: 1.1rem; font-weight: 900; color: rgba(45,139,139,.45); }
+    @media(max-width:640px){ .role-vs { padding: 8px 0; } }
+
+    /* ── EMBEDDING APPEARED TWICE ── */
+    .two-times {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+    }
+    @media(max-width:600px){ .two-times { grid-template-columns: 1fr; } }
+    .tt-card { background: var(--navy-mid); border: 1px solid rgba(45,139,139,.22); border-radius: 12px; overflow: hidden; }
+    .tt-card .tt-head { padding: 12px 18px; font-size: .75rem; font-weight: 700; letter-spacing: .1em; border-bottom: 1px solid rgba(45,139,139,.15); }
+    .tt-card.idx .tt-head { background: rgba(107,203,119,.1); color: var(--green); }
+    .tt-card.ret .tt-head { background: rgba(45,139,139,.12); color: var(--teal-light); }
+    .tt-card .tt-body { padding: 16px 18px; font-size: .86rem; color: rgba(241,250,238,.7); }
+
+    /* ── WORD2VEC HISTORY ── */
+    .history-line {
+      display: flex; flex-direction: column; gap: 0;
+      background: var(--navy-mid); border: 1px solid rgba(45,139,139,.22); border-radius: 14px; overflow: hidden;
+    }
+    .hl-row { display: grid; grid-template-columns: 120px 1fr; border-bottom: 1px solid rgba(45,139,139,.1); }
+    .hl-row:last-child { border-bottom: none; }
+    .hl-year { background: rgba(45,139,139,.12); padding: 16px 18px; display: flex; align-items: center; justify-content: center; }
+    .hl-year span { font-family: 'JetBrains Mono', monospace; font-size: .95rem; font-weight: 700; color: var(--seafoam); }
+    .hl-content { padding: 16px 20px; }
+    .hl-content h4 { font-size: .92rem; font-weight: 700; color: var(--white); margin-bottom: 4px; }
+    .hl-content p  { font-size: .84rem; color: rgba(241,250,238,.68); }
+
+    /* ── SEMANTIC SPACE DEMO ── */
+    .semantic-demo {
+      background: var(--navy-dark); border: 1px solid rgba(45,139,139,.2); border-radius: 14px; padding: 24px 26px;
+    }
+    .sem-title { font-size: .75rem; font-weight: 700; color: var(--teal-light); letter-spacing: .1em; margin-bottom: 18px; }
+    .sem-rows { display: flex; flex-direction: column; gap: 12px; }
+    .sem-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .sem-word { font-family: 'JetBrains Mono', monospace; font-size: .82rem; padding: 5px 12px; border-radius: 6px; font-weight: 600; flex-shrink: 0; }
+    .sw-a  { background: rgba(107,203,119,.15); border: 1px solid rgba(107,203,119,.35); color: var(--green); }
+    .sw-b  { background: rgba(45,139,139,.2);   border: 1px solid rgba(45,139,139,.45); color: var(--seafoam); }
+    .sw-c  { background: rgba(179,157,219,.15); border: 1px solid rgba(179,157,219,.35); color: var(--purple); }
+    .sw-d  { background: rgba(232,161,74,.12);  border: 1px solid rgba(232,161,74,.35);  color: var(--amber); }
+    .sem-dist {
+      flex: 1; min-width: 120px;
+      height: 6px; background: rgba(255,255,255,.06); border-radius: 3px; overflow: hidden;
+    }
+    .sem-fill { height: 100%; border-radius: 3px; }
+    .dist-near   { background: linear-gradient(90deg, var(--green),  rgba(107,203,119,.2)); }
+    .dist-mid    { background: linear-gradient(90deg, var(--teal),   rgba(45,139,139,.2)); }
+    .dist-far    { background: linear-gradient(90deg, var(--purple), rgba(179,157,219,.2)); }
+    .dist-farest { background: linear-gradient(90deg, var(--amber),  rgba(232,161,74,.2)); }
+    .sem-label { font-size: .74rem; color: rgba(241,250,238,.5); width: 80px; text-align: right; flex-shrink: 0; }
+
+    /* ── ONE HOT VS EMBEDDING ── */
+    .compare-enc { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media(max-width:620px){ .compare-enc { grid-template-columns: 1fr; } }
+    .enc-card { border-radius: 14px; overflow: hidden; }
+    .enc-old .ec-head { background: rgba(224,108,117,.1); border-bottom: 1px solid rgba(224,108,117,.2); color: var(--red); }
+    .enc-new .ec-head { background: rgba(107,203,119,.08); border-bottom: 1px solid rgba(107,203,119,.2); color: var(--green); }
+    .enc-card .ec-head { padding: 12px 18px; font-size: .76rem; font-weight: 700; letter-spacing: .08em; }
+    .enc-card .ec-body { background: var(--navy-mid); border: 1px solid rgba(45,139,139,.2); border-top: none; padding: 16px 18px; }
+    .enc-card .ec-body p { font-size: .86rem; color: rgba(241,250,238,.7); margin-bottom: 8px; }
+    .enc-card .ec-body p:last-child { margin-bottom: 0; }
+    .enc-card .ec-body .eg { font-family: 'JetBrains Mono', monospace; font-size: .78rem; color: var(--teal-light); background: var(--navy-dark); border-radius: 6px; padding: 8px 12px; margin: 8px 0; }
+    .enc-card .ec-body .flaw  { font-size: .8rem; color: var(--red);   margin-top: 6px; }
+    .enc-card .ec-body .merit { font-size: .8rem; color: var(--green); margin-top: 6px; }
+
+    /* ── PRIORITY LADDER ── */
+    .priority { display: flex; flex-direction: column; gap: 10px; }
+    .pr-item { display: flex; align-items: center; gap: 14px; }
+    .pr-rank {
+      width: 52px; height: 52px; border-radius: 50%; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-family: 'JetBrains Mono', monospace; font-size: .85rem; font-weight: 700;
+    }
+    .r1 { background: rgba(107,203,119,.2); border: 2px solid rgba(107,203,119,.6); color: var(--green); }
+    .r2 { background: rgba(45,139,139,.2);  border: 2px solid rgba(45,139,139,.6);  color: var(--teal-light); }
+    .r3 { background: rgba(168,218,220,.15);border: 2px solid rgba(168,218,220,.5); color: var(--seafoam); }
+    .r4 { background: rgba(179,157,219,.15);border: 2px solid rgba(179,157,219,.5); color: var(--purple); }
+    .pr-body { flex: 1; background: var(--navy-mid); border: 1px solid rgba(45,139,139,.2); border-radius: 12px; padding: 14px 18px; }
+    .pr-body h4 { font-size: .95rem; font-weight: 700; color: var(--white); margin-bottom: 4px; }
+    .pr-body p  { font-size: .84rem; color: rgba(241,250,238,.65); }
+    .pr-bar { width: 100%; height: 5px; background: rgba(255,255,255,.06); border-radius: 3px; overflow: hidden; margin-top: 8px; }
+    .pr-fill { height: 100%; border-radius: 3px; }
+    .pf1 { width: 95%; background: linear-gradient(90deg, var(--green),   rgba(107,203,119,.2)); }
+    .pf2 { width: 78%; background: linear-gradient(90deg, var(--teal),    rgba(45,139,139,.2)); }
+    .pf3 { width: 62%; background: linear-gradient(90deg, var(--seafoam), rgba(168,218,220,.2)); }
+    .pf4 { width: 48%; background: linear-gradient(90deg, var(--purple),  rgba(179,157,219,.2)); }
+    .pr-arrow { color: rgba(45,139,139,.3); font-size: 1.1rem; padding-left: 66px; }
+
+    /* ── GOLDEN ── */
+    .golden { background: rgba(45,139,139,.1); border-left: 4px solid var(--teal); border-radius: 0 12px 12px 0; padding: 18px 26px; font-size: .93rem; color: rgba(241,250,238,.85); margin-bottom: 12px; }
+    .golden strong { color: var(--seafoam); }
+    .warn-box { background: rgba(232,161,74,.08); border-left: 4px solid var(--amber); border-radius: 0 12px 12px 0; padding: 16px 22px; font-size: .88rem; color: rgba(241,250,238,.8); margin-bottom: 12px; }
+    .warn-box strong { color: var(--amber); }
+
+    /* ── SUMMARY TABLE ── */
+    .tbl-wrap { overflow-x: auto; border-radius: 12px; border: 1px solid rgba(45,139,139,.25); }
+    .sum-table { width: 100%; border-collapse: collapse; }
+    .sum-table th { background: rgba(45,139,139,.25); color: var(--seafoam); font-size: .8rem; font-weight: 700; letter-spacing: .05em; padding: 11px 16px; text-align: left; border-bottom: 2px solid var(--teal); }
+    .sum-table td { padding: 11px 16px; font-size: .855rem; color: rgba(241,250,238,.78); border-bottom: 1px solid rgba(45,139,139,.15); vertical-align: top; }
+    .sum-table tr:last-child td { border-bottom: none; }
+    .sum-table tr:nth-child(odd) td { background: rgba(255,255,255,.025); }
+    .chip { display: inline-block; background: rgba(45,139,139,.2); border: 1px solid rgba(45,139,139,.4); color: var(--seafoam); font-size: .75rem; font-weight: 600; border-radius: 6px; padding: 2px 9px; font-family: 'JetBrains Mono', monospace; }
+
+    footer { text-align: center; padding: 30px 24px; border-top: 1px solid rgba(45,139,139,.2); font-size: .78rem; color: rgba(241,250,238,.3); }
+    footer strong { color: var(--teal-light); }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="badge">🧠 概念深講單元整理</div>
+  <h1>向量資料庫與<span>嵌入式模型</span>比較</h1>
+  <p class="subtitle">張維元 ── RAG 精準搜尋實戰 03-02 | Embedding 決定語意品質，向量資料庫決定搜尋效率，RAG 準不準由診斷 Pipeline 決定</p>
+</header>
+
+<main>
+
+  <!-- 核心分工 -->
+  <div class="sec"><div class="bar"></div><h2>⚡ 最重要的一句話：兩者的職責分工</h2></div>
+  <div class="split-roles">
+    <div class="role-card role-emb">
+      <div class="rc-icon">🧠</div>
+      <div class="rc-tag">EMBEDDING MODEL</div>
+      <h3>嵌入式模型</h3>
+      <div class="rc-def">決定語意品質</div>
+      <p>負責把文字轉換成有意義的向量，決定向量空間「長什麼樣子」——相似的概念靠近，不相似的遠離。語意空間設計的好，LLM 才能有效找到適合資料。</p>
+      <ul>
+        <li>文件 Embedding → 向量存入資料庫</li>
+        <li>Query Embedding → 向量比對搜尋</li>
+        <li>模型好壞決定「找到的東西有沒有意義」</li>
+      </ul>
+    </div>
+    <div class="role-vs">⟺</div>
+    <div class="role-card role-db">
+      <div class="rc-icon">🗄️</div>
+      <div class="rc-tag">VECTOR DATABASE</div>
+      <h3>向量資料庫</h3>
+      <div class="rc-def">決定搜尋效率</div>
+      <p>負責在高維向量空間中，用索引結構快速找到最接近的向量。資料庫設計好壞決定「找得夠不夠快」，但無法改善語意本身的品質。</p>
+      <ul>
+        <li>索引結構決定查詢速度</li>
+        <li>不同 Index 在速度 / 精準 / 記憶體間取捨</li>
+        <li>資料庫解決效率問題，不解決語意問題</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- Embedding 在 RAG 中的兩次出現 -->
+  <div class="sec"><div class="bar"></div><h2>🔄 Embedding 在 RAG 流程中出現兩次</h2></div>
+  <div class="two-times">
+    <div class="tt-card idx">
+      <div class="tt-head">📥 第一次：索引階段（離線）</div>
+      <div class="tt-body">
+        將文件切成 Chunk 後，<strong>把每個 Chunk 轉換成向量</strong>，存入向量資料庫，建立語意索引。這一步決定了知識庫的「語意地圖」。
+      </div>
+    </div>
+    <div class="tt-card ret">
+      <div class="tt-head">🔍 第二次：檢索階段（即時）</div>
+      <div class="tt-body">
+        使用者發出查詢時，<strong>把 Query 也轉換成向量</strong>，再和資料庫中的向量計算相似度，取出最近的 K 筆 Chunk 作為上下文。
+      </div>
+    </div>
+  </div>
+  <div style="background:rgba(45,139,139,.08);border:1px solid rgba(45,139,139,.2);border-radius:10px;padding:14px 20px;margin-top:12px;font-size:.88rem;color:rgba(241,250,238,.75)">
+    💡 <strong style="color:var(--seafoam)">兩次必須使用同一個 Embedding 模型</strong>，才能確保向量空間對齊，讓 Query 向量和 Chunk 向量能正確比對。
+  </div>
+
+  <!-- 從 One-Hot 到 Embedding 的演進 -->
+  <div class="sec"><div class="bar"></div><h2>📐 從 One-Hot Encoding 到 Word Embedding</h2></div>
+  <div class="compare-enc">
+    <div class="enc-card enc-old">
+      <div class="ec-head">❌ 傳統做法：One-Hot Encoding（稀疏矩陣）</div>
+      <div class="ec-body">
+        <p>用一個超長的 0/1 向量代表每個字，每個字只對應一個位置為 1，其餘全為 0。</p>
+        <div class="eg">apple → [1, 0, 0, 0, ...]<br>dog   → [0, 1, 0, 0, ...]<br>cat   → [0, 0, 1, 0, ...]</div>
+        <p>只能表示「這個字有沒有出現」，無法表示詞義的遠近。</p>
+        <div class="flaw">⚠ apple 與 dog 的距離 = apple 與 elephant 的距離<br>⚠ 完全沒有語意概念，無法做語意搜尋</div>
+      </div>
+    </div>
+    <div class="enc-card enc-new">
+      <div class="ec-head">✅ Embedding：連續向量空間（稠密矩陣）</div>
+      <div class="ec-body">
+        <p>每個詞被映射到一個<strong>連續的低維向量</strong>，透過神經網路學習大量文本，保留詞與詞的語意關係。</p>
+        <div class="eg">dog  → [0.72, -0.31, 0.55, ...]<br>cat  → [0.68, -0.28, 0.51, ...]<br>plane→ [-0.12, 0.89, -0.34, ...]</div>
+        <p>語意相近的詞，向量距離也相近，支援語意運算。</p>
+        <div class="merit">✓ dog 與 cat 距離 &lt; dog 與 plane 距離<br>✓ 語意相似度 = 向量空間距離</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Word2Vec 歷史 -->
+  <div class="sec"><div class="bar"></div><h2>🕰️ Embedding 技術的發展脈絡</h2></div>
+  <div class="history-line">
+    <div class="hl-row">
+      <div class="hl-year"><span>2013</span></div>
+      <div class="hl-content">
+        <h4>Word2Vec（Google）— Embedding 的起點</h4>
+        <p>利用神經網路從大量文本學習詞與詞之間的關係，讓每個詞都能變成一組有意義的向量，且向量能保留原本文本間的語意關係。這是整個 Embedding 技術的奠基之作。</p>
+      </div>
+    </div>
+    <div class="hl-row">
+      <div class="hl-year"><span>Token</span></div>
+      <div class="hl-content">
+        <h4>模型看的不是「字」，是「Token」</h4>
+        <p>Token 是模型視角中能讀懂的最小語意單位——有時是一個字，有時是半個字，有時是一個詞。語言模型本質上在做<strong>機率預測</strong>：根據前面的 Token，預測下一個最可能出現的 Token。</p>
+      </div>
+    </div>
+    <div class="hl-row">
+      <div class="hl-year"><span>今日</span></div>
+      <div class="hl-content">
+        <h4>Sentence / Document Embedding</h4>
+        <p>從單詞延伸到句子、段落整體的向量化，讓 RAG 能以整段 Chunk 為單位進行語意搜尋，是現代 RAG 系統的核心技術基礎。</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 語意空間視覺化 -->
+  <div class="sec"><div class="bar"></div><h2>🗺️ 語意空間：向量距離 = 語意相似度</h2></div>
+  <div class="semantic-demo">
+    <div class="sem-title">以「狗」為基準點，其他概念在向量空間中的距離</div>
+    <div class="sem-rows">
+      <div class="sem-row">
+        <div class="sem-word sw-a">狗</div>
+        <div style="font-size:.75rem;color:rgba(241,250,238,.5);width:30px">←→</div>
+        <div class="sem-word sw-a">小狗</div>
+        <div class="sem-dist"><div class="sem-fill dist-near" style="width:15%"></div></div>
+        <div class="sem-label" style="color:var(--green)">距離極近</div>
+      </div>
+      <div class="sem-row">
+        <div class="sem-word sw-a">狗</div>
+        <div style="font-size:.75rem;color:rgba(241,250,238,.5);width:30px">←→</div>
+        <div class="sem-word sw-b">貓</div>
+        <div class="sem-dist"><div class="sem-fill dist-mid" style="width:35%"></div></div>
+        <div class="sem-label" style="color:var(--teal-light)">距離近</div>
+      </div>
+      <div class="sem-row">
+        <div class="sem-word sw-a">狗</div>
+        <div style="font-size:.75rem;color:rgba(241,250,238,.5);width:30px">←→</div>
+        <div class="sem-word sw-c">大象</div>
+        <div class="sem-dist"><div class="sem-fill dist-far" style="width:65%"></div></div>
+        <div class="sem-label" style="color:var(--purple)">距離較遠</div>
+      </div>
+      <div class="sem-row">
+        <div class="sem-word sw-a">狗</div>
+        <div style="font-size:.75rem;color:rgba(241,250,238,.5);width:30px">←→</div>
+        <div class="sem-word sw-d">飛機</div>
+        <div class="sem-dist"><div class="sem-fill dist-farest" style="width:90%"></div></div>
+        <div class="sem-label" style="color:var(--amber)">距離最遠</div>
+      </div>
+    </div>
+    <div style="margin-top:16px;font-size:.83rem;color:rgba(241,250,238,.6);border-top:1px solid rgba(45,139,139,.15);padding-top:14px">
+      💡 <strong style="color:var(--seafoam)">語意空間設計的好</strong>，就是讓「語意相似的概念向量靠近，不相似的遠離」。這讓電腦能用數學運算來理解人類語言——語言從此不只是文字，而是一個<strong style="color:var(--seafoam)">數學結構</strong>。
+    </div>
+  </div>
+
+  <!-- King-Woman 類比運算 -->
+  <div style="background:var(--navy-mid);border:1px solid rgba(45,139,139,.25);border-radius:14px;padding:22px 26px;margin-top:14px">
+    <div style="font-size:.75rem;font-weight:700;color:var(--teal-light);letter-spacing:.1em;margin-bottom:12px">⚡ Word2Vec 經典示範：向量可以做語意運算</div>
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-family:'JetBrains Mono',monospace;font-size:.85rem">
+      <span style="background:rgba(107,203,119,.15);border:1px solid rgba(107,203,119,.35);color:var(--green);border-radius:6px;padding:4px 12px">King</span>
+      <span style="color:rgba(241,250,238,.5);font-size:1rem">−</span>
+      <span style="background:rgba(45,139,139,.2);border:1px solid rgba(45,139,139,.45);color:var(--seafoam);border-radius:6px;padding:4px 12px">Man</span>
+      <span style="color:rgba(241,250,238,.5);font-size:1rem">+</span>
+      <span style="background:rgba(45,139,139,.2);border:1px solid rgba(45,139,139,.45);color:var(--seafoam);border-radius:6px;padding:4px 12px">Woman</span>
+      <span style="color:rgba(241,250,238,.5);font-size:1.2rem">≈</span>
+      <span style="background:rgba(232,161,74,.15);border:1px solid rgba(232,161,74,.4);color:var(--amber);border-radius:6px;padding:4px 12px;font-weight:700">Queen</span>
+    </div>
+    <div style="font-size:.83rem;color:rgba(241,250,238,.62);margin-top:12px">代表<strong style="color:var(--seafoam)">語意變成了向量運算</strong>。電腦不懂文字意義，卻能透過向量之間的關係進行「語意推理」——這正是整個 RAG 能夠成立的數學基礎。</div>
+  </div>
+
+  <!-- 換 Embedding 不一定會變準 -->
+  <div class="sec"><div class="bar"></div><h2>⚠️ 換 Embedding 模型，不一定讓 RAG 變準</h2></div>
+  <div class="warn-box">
+    <strong>「Embedding 好 ≠ RAG 準」</strong>——影響 RAG 準確率的是整條 Pipeline，而不只是 Embedding 模型的品質。換了更好的模型，若前面的 Chunk 切壞了，照樣沒有救。
+  </div>
+  <div style="background:var(--navy-mid);border:1px solid rgba(45,139,139,.22);border-radius:14px;padding:20px 24px">
+    <div style="font-size:.78rem;font-weight:700;color:var(--teal-light);letter-spacing:.08em;margin-bottom:14px">三種即使換好 Embedding 也救不了的情況</div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div style="background:rgba(224,108,117,.07);border:1px solid rgba(224,108,117,.25);border-radius:10px;padding:13px 16px;font-size:.86rem;color:rgba(241,250,238,.75)">
+        <strong style="color:var(--red)">情況一：Chunk 切壞</strong><br>
+        Chunk 的語意被切得零散，再強的 Embedding 模型也無法從破碎的片段中提取有意義的向量。
+      </div>
+      <div style="background:rgba(224,108,117,.07);border:1px solid rgba(224,108,117,.25);border-radius:10px;padding:13px 16px;font-size:.86rem;color:rgba(241,250,238,.75)">
+        <strong style="color:var(--red)">情況二：Top-K 沒包到答案</strong><br>
+        Retrieval 只抓了前 3 筆，但答案在第 4 筆。Embedding 再好，沒有被取回就沒有用——這是 Top-K 設定的問題。
+      </div>
+      <div style="background:rgba(224,108,117,.07);border:1px solid rgba(224,108,117,.25);border-radius:10px;padding:13px 16px;font-size:.86rem;color:rgba(241,250,238,.75)">
+        <strong style="color:var(--red)">情況三：Index 設計過於激進</strong><br>
+        Index 的召回策略設計不當，導致真正最近的向量反而找不到，問題出在資料庫配置層，不是 Embedding 層。
+      </div>
+    </div>
+    <div style="font-size:.84rem;color:var(--seafoam);margin-top:14px;font-weight:600">✅ 解法：診斷 Pipeline——找到究竟是哪一層出了問題，再針對性調整。</div>
+  </div>
+
+  <!-- 調優優先順序 -->
+  <div class="sec"><div class="bar"></div><h2>🏆 RAG 調優的優先順序</h2></div>
+  <div class="priority">
+    <div class="pr-item">
+      <div class="pr-rank r1">01</div>
+      <div class="pr-body">
+        <h4>Chunk（資料切分）</h4>
+        <p>最根本、影響最大。Chunk 切壞，後面一切都救不了。語意單元的完整性決定了整條 Pipeline 的上限。</p>
+        <div class="pr-bar"><div class="pr-fill pf1"></div></div>
+      </div>
+    </div>
+    <div class="pr-arrow">↓</div>
+    <div class="pr-item">
+      <div class="pr-rank r2">02</div>
+      <div class="pr-body">
+        <h4>Retrieval（檢索策略）</h4>
+        <p>Top-K 數量、混合搜尋策略、是否加入 Re-Rank。決定答案有沒有被找到。</p>
+        <div class="pr-bar"><div class="pr-fill pf2"></div></div>
+      </div>
+    </div>
+    <div class="pr-arrow">↓</div>
+    <div class="pr-item">
+      <div class="pr-rank r3">03</div>
+      <div class="pr-body">
+        <h4>Embedding Model（嵌入模型）</h4>
+        <p>決定語意空間品質。不同模型對技術文件、自然語言、中文的敏感度不同，需實驗選擇。</p>
+        <div class="pr-bar"><div class="pr-fill pf3"></div></div>
+      </div>
+    </div>
+    <div class="pr-arrow">↓</div>
+    <div class="pr-item">
+      <div class="pr-rank r4">04</div>
+      <div class="pr-body">
+        <h4>Index（索引結構）</h4>
+        <p>決定搜尋速度與記憶體用量。在前三層都設計良好的前提下，調整 Index 可進一步提升效能。</p>
+        <div class="pr-bar"><div class="pr-fill pf4"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 核心觀念 -->
+  <div class="sec"><div class="bar"></div><h2>💡 核心觀念</h2></div>
+  <div class="golden">
+    <strong>Embedding 不只是 API，是語意空間的設計問題。</strong>好的 Embedding 讓「全世界的文字壓縮在一個可被數學運算的向量空間」，語意越對齊，RAG 找到的資料就越有意義。
+  </div>
+  <div class="golden">
+    <strong>語言不再只是文字，而是一個數學結構。</strong>只要語意能被向量化，就能做距離的相似性搜尋——這是整個 RAG 能夠成立的根本原因。
+  </div>
+  <div class="golden">
+    <strong>RAG 準不準，由診斷 Pipeline 決定，不是只靠換模型。</strong>優先序：Chunk → Retrieval → Embedding → Index。每個環節都做好，效果自然水到渠成。
+  </div>
+
+  <!-- 總覽對照表 -->
+  <div class="sec"><div class="bar"></div><h2>📋 Embedding Model vs 向量資料庫 職責對照</h2></div>
+  <div class="tbl-wrap">
+    <table class="sum-table">
+      <thead>
+        <tr><th>面向</th><th>Embedding Model</th><th>向量資料庫</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>核心職責</td><td>決定語意品質（語意空間的形狀）</td><td>決定搜尋效率（查得多快、多準）</td></tr>
+        <tr><td>運作時機</td><td>索引階段（文件編碼）＋ 檢索階段（查詢編碼）</td><td>索引階段（建索引）＋ 檢索階段（近似搜尋）</td></tr>
+        <tr><td>影響什麼</td><td>找到的資料「有沒有意義」</td><td>找資料「夠不夠快」</td></tr>
+        <tr><td>調整方式</td><td>換模型、換 Token 化策略</td><td>換 Index 類型（Flat / IVF / HNSW）</td></tr>
+        <tr><td>優先順序</td><td>第 3 優先（Chunk 和 Retrieval 先確認）</td><td>第 4 優先（最後調整）</td></tr>
+        <tr><td>常見誤解</td><td>換更好的模型就能讓 RAG 變準 ✗</td><td>向量資料庫只是存 Embedding 的倉庫 ✗</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</main>
+
+<footer>
+  整理自 <strong>張維元 ── RAG 精準搜尋實戰 03-02</strong>｜向量資料庫與嵌入式模型比較
+</footer>
+
+</body>
+</html>

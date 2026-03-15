@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>二階檢索與 Re-Rank 排序機制 — 抓大放小的完整實作</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --navy:       #1a2332;
+      --navy-mid:   #22304a;
+      --navy-dark:  #0d1824;
+      --teal:       #2d8b8b;
+      --teal-light: #3aabab;
+      --seafoam:    #a8dadc;
+      --cream:      #f1faee;
+      --white:      #ffffff;
+      --amber:      #e8a14a;
+      --green:      #6bcb77;
+      --red:        #e06c75;
+      --purple:     #b39ddb;
+    }
+    body { font-family: 'Noto Sans TC', sans-serif; background: var(--navy); color: var(--cream); line-height: 1.7; }
+
+    header {
+      background: linear-gradient(135deg, #0d1824 0%, var(--navy-mid) 55%, #193e3e 100%);
+      padding: 64px 40px 52px; text-align: center; position: relative; overflow: hidden;
+    }
+    header::before {
+      content: ''; position: absolute; inset: 0;
+      background:
+        radial-gradient(ellipse 55% 45% at 15% 85%, rgba(45,139,139,.22) 0%, transparent 65%),
+        radial-gradient(ellipse 45% 55% at 85% 15%, rgba(168,218,220,.11) 0%, transparent 65%);
+    }
+    .badge { display: inline-block; background: rgba(45,139,139,.25); border: 1px solid var(--teal); color: var(--seafoam); font-size: .72rem; font-weight: 700; letter-spacing: .14em; padding: 5px 16px; border-radius: 20px; margin-bottom: 18px; position: relative; }
+    header h1 { font-size: clamp(1.7rem,4vw,2.75rem); font-weight: 900; color: var(--white); line-height: 1.25; position: relative; margin-bottom: 14px; }
+    header h1 span { color: var(--seafoam); }
+    header p.subtitle { font-size: .94rem; color: rgba(241,250,238,.6); max-width: 640px; margin: 0 auto; position: relative; }
+
+    main { max-width: 980px; margin: 0 auto; padding: 52px 24px 80px; }
+
+    .sec { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; margin-top: 52px; }
+    .sec:first-child { margin-top: 0; }
+    .sec .bar { width: 4px; height: 26px; background: linear-gradient(180deg, var(--teal), var(--seafoam)); border-radius: 2px; flex-shrink: 0; }
+    .sec h2 { font-size: 1.2rem; font-weight: 700; color: var(--seafoam); letter-spacing: .04em; }
+
+    .intro { background: linear-gradient(135deg, var(--navy-mid), #1d3a3a); border: 1px solid rgba(45,139,139,.4); border-radius: 16px; padding: 26px 32px; font-size: .95rem; color: rgba(241,250,238,.82); }
+    .intro strong { color: var(--seafoam); }
+
+    /* ── TWO STAGE FLOW ── */
+    .two-stage {
+      display: grid; grid-template-columns: 1fr 60px 1fr; gap: 0; align-items: stretch;
+    }
+    @media(max-width:640px){ .two-stage { grid-template-columns: 1fr; } }
+    .ts-card { border-radius: 14px; padding: 24px 22px; }
+    .ts-1 { background: rgba(45,139,139,.1);  border: 1px solid rgba(45,139,139,.4); }
+    .ts-2 { background: rgba(107,203,119,.07); border: 1px solid rgba(107,203,119,.35); }
+    .ts-card .tc-num  { font-family: 'JetBrains Mono', monospace; font-size: 2rem; font-weight: 700; margin-bottom: 6px; line-height: 1; }
+    .ts-1 .tc-num { color: rgba(45,139,139,.6); }
+    .ts-2 .tc-num { color: rgba(107,203,119,.6); }
+    .ts-card .tc-tag  { font-size: .7rem; font-weight: 700; letter-spacing: .12em; margin-bottom: 10px; }
+    .ts-1 .tc-tag { color: var(--teal-light); }
+    .ts-2 .tc-tag { color: var(--green); }
+    .ts-card h3 { font-size: 1rem; font-weight: 700; color: var(--white); margin-bottom: 8px; }
+    .ts-card p  { font-size: .875rem; color: rgba(241,250,238,.7); margin-bottom: 8px; }
+    .ts-card p:last-child { margin-bottom: 0; }
+    .ts-card .tc-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .tc-chip { font-family: 'JetBrains Mono', monospace; font-size: .73rem; padding: 2px 10px; border-radius: 5px; }
+    .chip-teal   { background: rgba(45,139,139,.2);   border: 1px solid rgba(45,139,139,.4);   color: var(--seafoam); }
+    .chip-green  { background: rgba(107,203,119,.12); border: 1px solid rgba(107,203,119,.4);   color: var(--green); }
+    .chip-amber  { background: rgba(232,161,74,.12);  border: 1px solid rgba(232,161,74,.4);    color: var(--amber); }
+    .chip-purple { background: rgba(179,157,219,.12); border: 1px solid rgba(179,157,219,.4);   color: var(--purple); }
+    .ts-arrow { display: flex; align-items: center; justify-content: center; font-size: 1.8rem; color: rgba(45,139,139,.4); font-weight: 700; }
+    @media(max-width:640px){ .ts-arrow { padding: 8px 0; } }
+
+    /* ── CODE BLOCK ── */
+    .code-wrap { background: var(--navy-dark); border: 1px solid rgba(45,139,139,.3); border-radius: 10px; overflow-x: auto; margin-top: 12px; }
+    .code-title { background: rgba(45,139,139,.18); padding: 7px 16px; font-size: .7rem; color: var(--teal-light); font-family: 'JetBrains Mono', monospace; letter-spacing: .06em; border-bottom: 1px solid rgba(45,139,139,.2); display: flex; align-items: center; justify-content: space-between; }
+    .ct-b { font-size: .65rem; padding: 1px 8px; border-radius: 10px; font-weight: 700; }
+    .ct-stage1 { background: rgba(45,139,139,.3);   color: var(--seafoam); }
+    .ct-stage2 { background: rgba(107,203,119,.2);  color: var(--green); }
+    .ct-hybrid { background: rgba(179,157,219,.2);  color: var(--purple); }
+    .ct-multi  { background: rgba(232,161,74,.2);   color: var(--amber); }
+    .ct-eval   { background: rgba(168,218,220,.2);  color: var(--seafoam); }
+    pre { font-family: 'JetBrains Mono', monospace; font-size: .79rem; line-height: 1.7; color: #c8d8e8; padding: 16px 20px; white-space: pre; }
+    .kw  { color: #58a6ff; }
+    .fn  { color: #79c0ff; }
+    .str { color: #a5d6a7; }
+    .cm  { color: #5a7490; font-style: italic; }
+    .num { color: #ffa657; }
+    .cls { color: #ffd700; }
+
+    /* ── MOVIE DEMO TABLE ── */
+    .demo-table-wrap { overflow-x: auto; border-radius: 12px; border: 1px solid rgba(45,139,139,.25); margin-top: 14px; }
+    .demo-table { width: 100%; border-collapse: collapse; }
+    .demo-table th { background: rgba(45,139,139,.25); color: var(--seafoam); font-size: .78rem; font-weight: 700; padding: 10px 16px; text-align: left; border-bottom: 2px solid var(--teal); }
+    .demo-table td { padding: 10px 16px; font-size: .84rem; color: rgba(241,250,238,.78); border-bottom: 1px solid rgba(45,139,139,.15); }
+    .demo-table tr:last-child td { border-bottom: none; }
+    .demo-table tr:nth-child(odd) td { background: rgba(255,255,255,.025); }
+    .rank-badge { display: inline-block; width: 22px; height: 22px; border-radius: 50%; text-align: center; line-height: 22px; font-size: .75rem; font-weight: 700; margin-right: 6px; }
+    .r-gold   { background: rgba(232,161,74,.3);  color: var(--amber); }
+    .r-silver { background: rgba(168,218,220,.2); color: var(--seafoam); }
+    .r-bronze { background: rgba(107,203,119,.2); color: var(--green); }
+    .r-other  { background: rgba(255,255,255,.08); color: rgba(241,250,238,.5); }
+    .score { font-family: 'JetBrains Mono', monospace; font-size: .82rem; }
+    .score.hi { color: var(--green); }
+    .score.lo { color: var(--amber); }
+
+    /* ── RERANK MODEL COMPARE ── */
+    .model-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media(max-width:620px){ .model-compare { grid-template-columns: 1fr; } }
+    .mc-card { background: var(--navy-mid); border-radius: 14px; overflow: hidden; border: 1px solid rgba(45,139,139,.22); }
+    .mc-card .mch { padding: 13px 18px; border-bottom: 1px solid rgba(45,139,139,.12); font-size: .75rem; font-weight: 700; letter-spacing: .08em; }
+    .mc-card.en .mch { background: rgba(224,108,117,.08); color: var(--red); }
+    .mc-card.zh .mch { background: rgba(107,203,119,.08); color: var(--green); }
+    .mc-card .mcb { padding: 16px 18px; }
+    .mc-card .mcb p { font-size: .87rem; color: rgba(241,250,238,.72); margin-bottom: 8px; }
+    .mc-card .mcb p:last-child { margin-bottom: 0; }
+    .mc-card .mc-pro { font-size: .79rem; color: var(--green);  margin-top: 6px; }
+    .mc-card .mc-con { font-size: .79rem; color: var(--red);    margin-top: 4px; }
+    .mc-model { font-family: 'JetBrains Mono', monospace; font-size: .78rem; background: var(--navy-dark); border-radius: 6px; padding: 4px 10px; display: inline-block; color: var(--teal-light); margin-top: 8px; }
+
+    /* ── RETRIEVAL TEXT STRATEGY ── */
+    .text-strat { display: grid; grid-template-columns: repeat(3,1fr); gap: 14px; }
+    @media(max-width:640px){ .text-strat { grid-template-columns: 1fr; } }
+    .ts-box { background: var(--navy-mid); border: 1px solid rgba(45,139,139,.22); border-radius: 12px; padding: 18px 18px; text-align: center; transition: border-color .2s; }
+    .ts-box:hover { border-color: var(--teal); }
+    .ts-box .tb-icon { font-size: 1.6rem; margin-bottom: 8px; }
+    .ts-box .tb-tag  { font-size: .7rem; font-weight: 700; letter-spacing: .1em; margin-bottom: 6px; }
+    .ts-box.t-title   .tb-tag { color: var(--teal-light); }
+    .ts-box.t-content .tb-tag { color: var(--purple); }
+    .ts-box.t-both    .tb-tag { color: var(--seafoam); border-color: var(--seafoam); }
+    .ts-box h4 { font-size: .9rem; font-weight: 700; color: var(--white); margin-bottom: 6px; }
+    .ts-box p  { font-size: .82rem; color: rgba(241,250,238,.62); }
+    .ts-box .tb-result { font-size: .79rem; margin-top: 8px; font-weight: 600; }
+    .ts-box.t-title   .tb-result { color: var(--amber); }
+    .ts-box.t-content .tb-result { color: var(--amber); }
+    .ts-box.t-both    .tb-result { color: var(--green); }
+
+    /* ── THREE METHODS FLOW ── */
+    .method-cards { display: flex; flex-direction: column; gap: 16px; }
+    .mc-flow { background: var(--navy-mid); border: 1px solid rgba(45,139,139,.22); border-radius: 14px; overflow: hidden; }
+    .mc-flow .mf-head { padding: 14px 20px; border-bottom: 1px solid rgba(45,139,139,.12); display: flex; align-items: center; gap: 12px; }
+    .mc-flow.m1 .mf-head { background: rgba(45,139,139,.1); }
+    .mc-flow.m2 .mf-head { background: rgba(179,157,219,.08); }
+    .mc-flow.m3 .mf-head { background: rgba(232,161,74,.07); }
+    .mf-head .mh-num { font-family: 'JetBrains Mono', monospace; font-size: .85rem; font-weight: 700; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .mc-flow.m1 .mh-num { background: rgba(45,139,139,.3);   color: var(--seafoam); }
+    .mc-flow.m2 .mh-num { background: rgba(179,157,219,.2);  color: var(--purple); }
+    .mc-flow.m3 .mh-num { background: rgba(232,161,74,.2);   color: var(--amber); }
+    .mf-head .mh-title { font-size: 1rem; font-weight: 700; color: var(--white); }
+    .mf-head .mh-sub   { font-size: .78rem; color: rgba(241,250,238,.55); }
+    .mc-flow .mf-body { padding: 18px 22px; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    @media(max-width:620px){ .mc-flow .mf-body { grid-template-columns: 1fr; } }
+    .mf-body p { font-size: .875rem; color: rgba(241,250,238,.72); }
+    .mf-steps { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+    .mf-step { font-family: 'JetBrains Mono', monospace; font-size: .72rem; padding: 3px 10px; border-radius: 5px; background: rgba(45,139,139,.12); border: 1px solid rgba(45,139,139,.25); color: var(--teal-light); }
+    .mf-arrow-sm { color: rgba(45,139,139,.5); font-size: .9rem; }
+
+    /* ── RAGAS METRICS ── */
+    .ragas-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 14px; }
+    @media(max-width:620px){ .ragas-grid { grid-template-columns: 1fr; } }
+    .rg-card { background: var(--navy-mid); border-radius: 12px; padding: 18px 20px; border: 1px solid rgba(45,139,139,.22); }
+    .rg-card .rc-icon { font-size: 1.4rem; margin-bottom: 8px; }
+    .rg-card .rc-name { font-size: .72rem; font-weight: 700; letter-spacing: .1em; color: var(--teal-light); margin-bottom: 6px; }
+    .rg-card h4 { font-size: .92rem; font-weight: 700; color: var(--white); margin-bottom: 6px; }
+    .rg-card p  { font-size: .84rem; color: rgba(241,250,238,.65); }
+    .rg-card .rc-q { font-size: .79rem; color: var(--seafoam); margin-top: 8px; font-style: italic; }
+
+    /* ── GOLDEN ── */
+    .golden { background: rgba(45,139,139,.1); border-left: 4px solid var(--teal); border-radius: 0 12px 12px 0; padding: 18px 26px; font-size: .93rem; color: rgba(241,250,238,.85); margin-bottom: 12px; }
+    .golden strong { color: var(--seafoam); }
+    .warn-box { background: rgba(232,161,74,.08); border-left: 4px solid var(--amber); border-radius: 0 12px 12px 0; padding: 16px 22px; font-size: .88rem; color: rgba(241,250,238,.8); margin-bottom: 12px; }
+    .warn-box strong { color: var(--amber); }
+
+    /* ── SUMMARY TABLE ── */
+    .tbl-wrap { overflow-x: auto; border-radius: 12px; border: 1px solid rgba(45,139,139,.25); }
+    .sum-table { width: 100%; border-collapse: collapse; }
+    .sum-table th { background: rgba(45,139,139,.25); color: var(--seafoam); font-size: .8rem; font-weight: 700; letter-spacing: .05em; padding: 11px 16px; text-align: left; border-bottom: 2px solid var(--teal); }
+    .sum-table td { padding: 11px 16px; font-size: .855rem; color: rgba(241,250,238,.78); border-bottom: 1px solid rgba(45,139,139,.15); vertical-align: top; }
+    .sum-table tr:last-child td { border-bottom: none; }
+    .sum-table tr:nth-child(odd) td { background: rgba(255,255,255,.025); }
+    .chip { display: inline-block; background: rgba(45,139,139,.2); border: 1px solid rgba(45,139,139,.4); color: var(--seafoam); font-size: .75rem; font-weight: 600; border-radius: 6px; padding: 2px 9px; font-family: 'JetBrains Mono', monospace; }
+
+    footer { text-align: center; padding: 30px 24px; border-top: 1px solid rgba(45,139,139,.2); font-size: .78rem; color: rgba(241,250,238,.3); }
+    footer strong { color: var(--teal-light); }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="badge">🛠️ 實作單元整理</div>
+  <h1>二階檢索與 <span>Re-Rank</span> 排序機制</h1>
+  <p class="subtitle">張維元 ── RAG 精準搜尋實戰 03-05 | 抓大放小策略 × CrossEncoder Re-Rank × Hybrid Search × Multi-Query × RAGAS 評估</p>
+</header>
+
+<main>
+
+  <!-- 核心策略 -->
+  <div class="sec"><div class="bar"></div><h2>🎯 核心策略：抓大放小</h2></div>
+  <div class="intro">
+    向量搜尋找到的 K 句話「很像」，但不代表「最正確」——相似度不等於相關性。<br>
+    解法：先用<strong>寬鬆的條件多撈一點（高 Recall）</strong>，再透過<strong>精準的 Re-Rank 排序機制篩選出真正重要的（高 Precision）</strong>。
+  </div>
+
+  <!-- 兩階段對比 -->
+  <div class="sec"><div class="bar"></div><h2>⚡ 兩階段運作機制</h2></div>
+  <div class="two-stage">
+    <div class="ts-card ts-1">
+      <div class="tc-num">01</div>
+      <div class="tc-tag">STAGE 1 — 寬鬆召回</div>
+      <h3>向量相似度初篩</h3>
+      <p>用語意向量快速撈出候選集，寧可多抓也不要漏掉正確答案。追求 <strong>Recall 高</strong>，不強求 Precision。</p>
+      <div class="tc-chips">
+        <span class="tc-chip chip-teal">速度快</span>
+        <span class="tc-chip chip-teal">成本低</span>
+        <span class="tc-chip chip-teal">Top-20 ～ Top-50</span>
+        <span class="tc-chip chip-amber">可能有雜訊</span>
+      </div>
+    </div>
+    <div class="ts-arrow">→</div>
+    <div class="ts-card ts-2">
+      <div class="tc-num">02</div>
+      <div class="tc-tag">STAGE 2 — 精準排序</div>
+      <h3>CrossEncoder Re-Rank</h3>
+      <p>對候選集進行精細的二次排序，判斷每筆 Chunk 與 Query 的<strong>真實相關性</strong>，追求 Precision 高。</p>
+      <div class="tc-chips">
+        <span class="tc-chip chip-green">準確度高</span>
+        <span class="tc-chip chip-green">最終 Top-3 ～ 5</span>
+        <span class="tc-chip chip-amber">速度較慢</span>
+        <span class="tc-chip chip-amber">成本較高</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 實作資料與範例 -->
+  <div class="sec"><div class="bar"></div><h2>🎬 實作範例：電影資料庫搜尋</h2></div>
+  <div style="background:var(--navy-mid);border:1px solid rgba(45,139,139,.22);border-radius:14px;padding:18px 22px;margin-bottom:16px;font-size:.87rem;color:rgba(241,250,238,.72)">
+    實作查詢：「<strong style="color:var(--seafoam)">我想看蝙蝠的超級英雄動作片</strong>」<br>
+    關鍵字拆解：<span style="background:rgba(45,139,139,.15);border-radius:4px;padding:1px 7px;margin:0 3px;font-family:'JetBrains Mono',monospace;font-size:.8rem;color:var(--teal-light)">蝙蝠</span> + <span style="background:rgba(45,139,139,.15);border-radius:4px;padding:1px 7px;margin:0 3px;font-family:'JetBrains Mono',monospace;font-size:.8rem;color:var(--teal-light)">超級英雄</span> + <span style="background:rgba(45,139,139,.15);border-radius:4px;padding:1px 7px;margin:0 3px;font-family:'JetBrains Mono',monospace;font-size:.8rem;color:var(--teal-light)">動作片</span>
+  </div>
+
+  <!-- Stage 1 程式碼 -->
+  <div style="font-size:.8rem;font-weight:700;color:var(--teal-light);letter-spacing:.06em;margin-bottom:8px">STEP 1 — 向量搜尋初篩（Sentence Transformers + ChromaDB）</div>
+  <div class="code-wrap">
+    <div class="code-title">Python — 建立向量資料庫並初篩 <span class="ct-b ct-stage1">STAGE 1</span></div>
+    <pre><span class="kw">from</span> sentence_transformers <span class="kw">import</span> <span class="cls">SentenceTransformer</span>
+<span class="kw">import</span> chromadb
+
+<span class="cm"># 初始化 Embedding 模型</span>
+model = <span class="cls">SentenceTransformer</span>(<span class="str">"paraphrase-multilingual-MiniLM-L12-v2"</span>)
+
+<span class="cm"># 電影資料（title 存 metadata，content 存 document）</span>
+movies = [
+    {<span class="str">"title"</span>: <span class="str">"黑暗騎士"</span>,       <span class="str">"content"</span>: <span class="str">"蝙蝠俠對抗小丑的暗黑英雄動作片"</span>},
+    {<span class="str">"title"</span>: <span class="str">"蝙蝠俠大戰超人"</span>, <span class="str">"content"</span>: <span class="str">"DC 兩大英雄的史詩對決"</span>},
+    {<span class="str">"title"</span>: <span class="str">"蜘蛛人：無家日"</span>, <span class="str">"content"</span>: <span class="str">"多元宇宙蜘蛛人的奇幻冒險"</span>},
+    {<span class="str">"title"</span>: <span class="str">"神偷奶爸"</span>,       <span class="str">"content"</span>: <span class="str">"壞蛋變成愛心奶爸的喜劇動畫"</span>},
+]
+
+<span class="cm"># 建立向量資料庫</span>
+client     = chromadb.<span class="fn">Client</span>()
+collection = client.<span class="fn">create_collection</span>(<span class="str">"movies"</span>)
+<span class="kw">for</span> i, m <span class="kw">in</span> <span class="fn">enumerate</span>(movies):
+    vec = model.<span class="fn">encode</span>(m[<span class="str">"content"</span>]).<span class="fn">tolist</span>()
+    collection.<span class="fn">add</span>(ids=[<span class="fn">str</span>(i)], embeddings=[vec],
+                    metadatas=[{<span class="str">"title"</span>: m[<span class="str">"title"</span>]}],
+                    documents=[m[<span class="str">"content"</span>]])
+
+<span class="cm"># 查詢：取前 4 筆候選（寬鬆召回）</span>
+query    = <span class="str">"我想看蝙蝠的超級英雄動作片"</span>
+q_vec    = model.<span class="fn">encode</span>(query).<span class="fn">tolist</span>()
+results  = collection.<span class="fn">query</span>(query_embeddings=[q_vec], n_results=<span class="num">4</span>)</pre>
+  </div>
+
+  <!-- Stage 1 結果 -->
+  <div class="demo-table-wrap">
+    <table class="demo-table">
+      <thead>
+        <tr><th>初篩排名</th><th>電影名稱</th><th>向量相似度分數</th><th>備註</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><span class="rank-badge r-gold">1</span></td><td>黑暗騎士</td><td><span class="score hi">0.82</span></td><td>語意最接近蝙蝠英雄</td></tr>
+        <tr><td><span class="rank-badge r-silver">2</span></td><td>蝙蝠俠大戰超人</td><td><span class="score hi">0.79</span></td><td>DC 英雄動作片</td></tr>
+        <tr><td><span class="rank-badge r-bronze">3</span></td><td>神偷奶爸</td><td><span class="score lo">0.51</span></td><td>動作？語意模糊混入</td></tr>
+        <tr><td><span class="rank-badge r-other">4</span></td><td>蜘蛛人：無家日</td><td><span class="score lo">0.48</span></td><td>超級英雄語意相關</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="warn-box" style="margin-top:12px">
+    <strong>⚠ 初篩問題：</strong>「神偷奶爸」透過語意模糊混入前4，這就是為什麼需要 Re-Rank——初篩只保證 Recall，不保證 Precision。
+  </div>
+
+  <!-- Stage 2 程式碼 -->
+  <div style="font-size:.8rem;font-weight:700;color:var(--green);letter-spacing:.06em;margin:20px 0 8px">STEP 2 — CrossEncoder Re-Rank 精準排序</div>
+  <div class="code-wrap">
+    <div class="code-title">Python — CrossEncoder Re-Rank 實作 <span class="ct-b ct-stage2">STAGE 2</span></div>
+    <pre><span class="kw">from</span> sentence_transformers <span class="kw">import</span> <span class="cls">CrossEncoder</span>
+
+<span class="cm"># 使用支援中文的 CrossEncoder 模型（BGE Re-Ranker）</span>
+reranker = <span class="cls">CrossEncoder</span>(<span class="str">"BAAI/bge-reranker-base"</span>)
+
+<span class="cm"># 取出初篩結果</span>
+candidates = results[<span class="str">"documents"</span>][<span class="num">0</span>]     <span class="cm"># 文件內容</span>
+titles     = [m[<span class="str">"title"</span>] <span class="kw">for</span> m <span class="kw">in</span> results[<span class="str">"metadatas"</span>][<span class="num">0</span>]]
+
+<span class="cm"># 用「標題 + 內文」拼合後做 Re-Rank（效果最佳）</span>
+pairs  = [(query, t + <span class="str">" "</span> + c) <span class="kw">for</span> t, c <span class="kw">in</span> <span class="fn">zip</span>(titles, candidates)]
+scores = reranker.<span class="fn">predict</span>(pairs)
+
+<span class="cm"># 依分數降序排列</span>
+ranked = <span class="fn">sorted</span>(<span class="fn">zip</span>(titles, candidates, scores),
+                key=<span class="kw">lambda</span> x: x[<span class="num">2</span>], reverse=<span class="kw">True</span>)
+
+<span class="kw">for</span> title, content, score <span class="kw">in</span> ranked:
+    <span class="fn">print</span>(<span class="fn">f</span><span class="str">"{title}: {score:.4f}"</span>)</pre>
+  </div>
+
+  <!-- Re-Rank 模型選擇 -->
+  <div class="sec"><div class="bar"></div><h2>🤖 Re-Rank 模型選擇：英文 vs 中文</h2></div>
+  <div class="model-compare">
+    <div class="mc-card en">
+      <div class="mch">❌ 英文模型用於中文</div>
+      <div class="mcb">
+        <p>使用預設的英文 CrossEncoder 模型排序中文內容，語意對齊效果不佳，排序結果不符合預期。</p>
+        <p>例如「蜘蛛人：無家日」可能因英文詞根匹配而排名虛高，蓋過更相關的蝙蝠俠系列。</p>
+        <div class="mc-model">cross-encoder/ms-marco-MiniLM-L-6-v2</div>
+        <div class="mc-con">✗ 對中文排序結果不可信</div>
+      </div>
+    </div>
+    <div class="mc-card zh">
+      <div class="mch">✅ 中文專用模型（BGE）</div>
+      <div class="mcb">
+        <p>使用 BAAI 出品的 BGE（BAAI General Embedding）Re-Ranker，專為中英文語料優化，排序品質顯著提升。</p>
+        <p>排序後「黑暗騎士」正確拉升至首位，蝙蝠俠大戰超人依序排列，符合語意預期。</p>
+        <div class="mc-model">BAAI/bge-reranker-base</div>
+        <div class="mc-pro">✓ 中文環境推薦，HuggingFace 可取得</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 文字欄位策略 -->
+  <div class="sec"><div class="bar"></div><h2>📝 Re-Rank 的文字輸入策略比較</h2></div>
+  <div class="text-strat">
+    <div class="ts-box t-title">
+      <div class="tb-icon">🏷️</div>
+      <div class="tb-tag">僅用標題（Title）</div>
+      <h4>標題排序</h4>
+      <p>只把電影標題送入 Re-Ranker，語意資訊量少，可能因標題文字不夠完整而排序失準。</p>
+      <div class="tb-result">⚠ 效果有限，資訊不足</div>
+    </div>
+    <div class="ts-box t-content">
+      <div class="tb-icon">📄</div>
+      <div class="tb-tag">僅用內文（Content）</div>
+      <h4>內容排序</h4>
+      <p>只把電影描述送入，雖然資訊量較多，但缺少標題的明確識別資訊，仍有偏差。</p>
+      <div class="tb-result">⚠ 效果中等，仍有改善空間</div>
+    </div>
+    <div class="ts-box t-both">
+      <div class="tb-icon">✅</div>
+      <div class="tb-tag">標題 + 內文（推薦）</div>
+      <h4>拼合後排序</h4>
+      <p>將「標題 + 內文」拼接後作為輸入，讓 Re-Ranker 同時看到識別資訊與語意內容，效果最佳。</p>
+      <div class="tb-result">✓ 符合預期，推薦做法</div>
+    </div>
+  </div>
+
+  <!-- 三種進階策略 -->
+  <div class="sec"><div class="bar"></div><h2>🔀 三種進階 Retrieval 策略實作</h2></div>
+  <div class="method-cards">
+
+    <!-- Method 1 -->
+    <div class="mc-flow m1">
+      <div class="mf-head">
+        <div class="mh-num">1</div>
+        <div>
+          <div class="mh-title">單純二階檢索（Vector → Re-Rank）</div>
+          <div class="mh-sub">基礎做法，適合大多數場景</div>
+        </div>
+      </div>
+      <div class="mf-body">
+        <div>
+          <p>用向量搜尋取出 Top-K 候選，再用 CrossEncoder 精排，最後取前 N 筆送入 LLM 生成回答。</p>
+        </div>
+        <div>
+          <div class="mf-steps">
+            <span class="mf-step">向量查詢 Top-K</span>
+            <span class="mf-arrow-sm">→</span>
+            <span class="mf-step">CrossEncoder Re-Rank</span>
+            <span class="mf-arrow-sm">→</span>
+            <span class="mf-step">LLM 生成</span>
+          </div>
+        </div>
+      </div>
+      <div class="code-wrap" style="margin:0 18px 18px">
+        <div class="code-title">Python — 二階檢索 + LLM 生成 <span class="ct-b ct-stage1">BASIC</span></div>
+        <pre><span class="cm"># 取出 Re-Rank 後的前 3 筆作為上下文</span>
+top_docs = [content <span class="kw">for</span> _, content, _ <span class="kw">in</span> ranked[:<span class="num">3</span>]]
+context  = <span class="str">"\n"</span>.<span class="fn">join</span>(top_docs)
+
+prompt = <span class="fn">f</span><span class="str">"""根據以下電影資料回答：
+{context}
+
+問題：{query}
+請根據上述資料推薦最符合的電影。"""</span>
+
+<span class="cm"># 送入 LLM 生成答案</span>
+response = openai_client.chat.completions.<span class="fn">create</span>(
+    model=<span class="str">"gpt-4o-mini"</span>,
+    messages=[{<span class="str">"role"</span>: <span class="str">"user"</span>, <span class="str">"content"</span>: prompt}]
+)</pre>
+      </div>
+    </div>
+
+    <!-- Method 2 -->
+    <div class="mc-flow m2">
+      <div class="mf-head">
+        <div class="mh-num">2</div>
+        <div>
+          <div class="mh-title">Hybrid Search（向量 + BM25 → Re-Rank）</div>
+          <div class="mh-sub">兼顧語意與精準關鍵字，適合複雜查詢</div>
+        </div>
+      </div>
+      <div class="mf-body">
+        <div>
+          <p>兩種搜尋分別取回候選集，合併去重後統一送入 Re-Ranker 精排，同時保有語意模糊 + 精準關鍵字的能力。</p>
+        </div>
+        <div>
+          <div class="mf-steps">
+            <span class="mf-step">向量搜尋</span>
+            <span class="mf-arrow-sm">+</span>
+            <span class="mf-step">BM25 關鍵字</span>
+            <span class="mf-arrow-sm">→</span>
+            <span class="mf-step">合併去重</span>
+            <span class="mf-arrow-sm">→</span>
+            <span class="mf-step">Re-Rank</span>
+            <span class="mf-arrow-sm">→</span>
+            <span class="mf-step">LLM</span>
+          </div>
+        </div>
+      </div>
+      <div class="code-wrap" style="margin:0 18px 18px">
+        <div class="code-title">Python — Hybrid Search 合併候選集 <span class="ct-b ct-hybrid">HYBRID</span></div>
+        <pre><span class="kw">from</span> rank_bm25 <span class="kw">import</span> <span class="cls">BM25Okapi</span>
+
+<span class="cm"># BM25 關鍵字搜尋</span>
+keywords   = [<span class="str">"英雄"</span>, <span class="str">"動作"</span>]
+corpus     = [m[<span class="str">"content"</span>].<span class="fn">split</span>() <span class="kw">for</span> m <span class="kw">in</span> movies]
+bm25       = <span class="cls">BM25Okapi</span>(corpus)
+bm25_scores= bm25.<span class="fn">get_scores</span>(keywords)
+bm25_top   = bm25_scores.<span class="fn">argsort</span>()[::-<span class="num">1</span>][:<span class="num">4</span>]
+
+<span class="cm"># 合併：向量搜尋結果 + BM25 結果，去重</span>
+vector_ids = <span class="fn">set</span>(results[<span class="str">"ids"</span>][<span class="num">0</span>])
+bm25_ids   = <span class="fn">set</span>(<span class="fn">str</span>(i) <span class="kw">for</span> i <span class="kw">in</span> bm25_top)
+merged_ids = vector_ids | bm25_ids   <span class="cm"># 取聯集</span>
+
+<span class="cm"># 對合併後的候選集統一 Re-Rank</span>
+merged_docs = [movies[<span class="fn">int</span>(i)] <span class="kw">for</span> i <span class="kw">in</span> merged_ids]
+<span class="cm"># ... 接 CrossEncoder Re-Rank 流程</span></pre>
+      </div>
+    </div>
+
+    <!-- Method 3 -->
+    <div class="mc-flow m3">
+      <div class="mf-head">
+        <div class="mh-num">3</div>
+        <div>
+          <div class="mh-title">Multi-Query（查詢擴展 → 多路搜尋 → Re-Rank）</div>
+          <div class="mh-sub">用 LLM 改寫查詢，應對模糊或口語化的問題</div>
+        </div>
+      </div>
+      <div class="mf-body">
+        <div>
+          <p>使用者說「高譚市的守護者」，資料庫裡可能沒有這個詞，但 LLM 能將其擴展為「蝙蝠俠、蝙蝠、暗黑騎士」等查詢，提升召回率。</p>
+        </div>
+        <div>
+          <div class="mf-steps">
+            <span class="mf-step">原始 Query</span>
+            <span class="mf-arrow-sm">→</span>
+            <span class="mf-step">LLM 改寫擴展</span>
+            <span class="mf-arrow-sm">→</span>
+            <span class="mf-step">多路向量查詢</span>
+            <span class="mf-arrow-sm">→</span>
+            <span class="mf-step">去重合併</span>
+            <span class="mf-arrow-sm">→</span>
+            <span class="mf-step">Re-Rank</span>
+          </div>
+        </div>
+      </div>
+      <div class="code-wrap" style="margin:0 18px 18px">
+        <div class="code-title">Python — Multi-Query 查詢擴展 <span class="ct-b ct-multi">MULTI-QUERY</span></div>
+        <pre><span class="cm"># 用 LLM 把模糊查詢擴展成多個關鍵字</span>
+expand_prompt = <span class="fn">f</span><span class="str">"""把「{query}」改寫成 3 個不同的搜尋查詢。
+每行一個，只輸出查詢詞，不要其他說明。"""</span>
+
+expanded_queries = llm.<span class="fn">generate</span>(expand_prompt).<span class="fn">split</span>(<span class="str">"\n"</span>)
+<span class="cm"># 例如：["蝙蝠俠動作片", "DC 超級英雄電影", "暗黑英雄動作"]</span>
+
+<span class="cm"># 對每個擴展查詢分別做向量搜尋</span>
+all_candidates = []
+<span class="kw">for</span> q <span class="kw">in</span> expanded_queries:
+    q_vec  = model.<span class="fn">encode</span>(q).<span class="fn">tolist</span>()
+    result = collection.<span class="fn">query</span>(query_embeddings=[q_vec], n_results=<span class="num">3</span>)
+    all_candidates.<span class="fn">extend</span>(result[<span class="str">"documents"</span>][<span class="num">0</span>])
+
+<span class="cm"># 去重後統一 Re-Rank</span>
+unique_candidates = <span class="fn">list</span>(<span class="fn">dict</span>.<span class="fn">fromkeys</span>(all_candidates))
+<span class="cm"># ... 接 CrossEncoder Re-Rank 流程</span></pre>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- RAGAS 評估 -->
+  <div class="sec"><div class="bar"></div><h2>📊 RAGAS 評估框架：量化 RAG 效果</h2></div>
+  <div style="background:rgba(45,139,139,.08);border:1px solid rgba(45,139,139,.2);border-radius:12px;padding:14px 22px;margin-bottom:18px;font-size:.88rem;color:rgba(241,250,238,.75)">
+    做完 RAG 系統後，怎麼知道效果好不好？用 <strong style="color:var(--seafoam)">RAGAS</strong>（RAG Assessment）框架，以四個指標量化評估，找出系統瓶頸。
+  </div>
+  <div class="ragas-grid">
+    <div class="rg-card">
+      <div class="rc-icon">✅</div>
+      <div class="rc-name">FAITHFULNESS — 正確性</div>
+      <h4>生成答案有沒有基於參考資料</h4>
+      <p>LLM 的回答是否忠實於檢索到的 Context，還是自己「發揮」了超出資料的內容（幻覺）。</p>
+      <div class="rc-q">「答案是從 Context 生成的嗎？」</div>
+    </div>
+    <div class="rg-card">
+      <div class="rc-icon">🎯</div>
+      <div class="rc-name">ANSWER RELEVANCY — 答案相關性</div>
+      <h4>生成答案有沒有真正回答問題</h4>
+      <p>回答的內容是否切合使用者的問題，避免答非所問或提供過多不相關資訊。</p>
+      <div class="rc-q">「答案有回答到問題嗎？」</div>
+    </div>
+    <div class="rg-card">
+      <div class="rc-icon">🔍</div>
+      <div class="rc-name">CONTEXT PRECISION — 上下文精準率</div>
+      <h4>取回的 Context 有多少是真正有用的</h4>
+      <p>衡量檢索到的 Chunk 中，有多少比例與回答問題真正相關——去除雜訊的能力。</p>
+      <div class="rc-q">「找到的 Context 夠精準嗎？」</div>
+    </div>
+    <div class="rg-card">
+      <div class="rc-icon">📡</div>
+      <div class="rc-name">CONTEXT RECALL — 上下文召回率</div>
+      <h4>應被找到的資料有沒有被找到</h4>
+      <p>衡量所有回答問題所需的資訊是否都被成功檢索出來——不漏掉重要資料的能力。</p>
+      <div class="rc-q">「需要的 Context 都找齊了嗎？」</div>
+    </div>
+  </div>
+
+  <div class="code-wrap" style="margin-top:14px">
+    <div class="code-title">Python — RAGAS 評估使用範例 <span class="ct-b ct-eval">RAGAS</span></div>
+    <pre><span class="kw">from</span> ragas <span class="kw">import</span> evaluate
+<span class="kw">from</span> ragas.metrics <span class="kw">import</span> (
+    faithfulness, answer_relevancy,
+    context_precision, context_recall
+)
+<span class="kw">from</span> datasets <span class="kw">import</span> <span class="cls">Dataset</span>
+
+<span class="cm"># 準備評估資料集（Ground Truth 問題 + 答案）</span>
+eval_data = {
+    <span class="str">"question"</span>:  [<span class="str">"推薦一部蝙蝠俠相關的動作片"</span>],
+    <span class="str">"answer"</span>:    [llm_generated_answer],         <span class="cm"># LLM 生成的答案</span>
+    <span class="str">"contexts"</span>:  [[top_docs[<span class="num">0</span>], top_docs[<span class="num">1</span>]]],  <span class="cm"># 取到的 Context</span>
+    <span class="str">"ground_truth"</span>: [<span class="str">"黑暗騎士是蝙蝠俠系列中評價最高的動作片"</span>]
+}
+
+dataset = <span class="cls">Dataset</span>.<span class="fn">from_dict</span>(eval_data)
+result  = <span class="fn">evaluate</span>(
+    dataset,
+    metrics=[faithfulness, answer_relevancy,
+             context_precision, context_recall]
+)
+<span class="fn">print</span>(result)
+<span class="cm"># → {'faithfulness': 0.92, 'answer_relevancy': 0.88,
+<span class="cm">#    'context_precision': 0.75, 'context_recall': 0.83}</span></pre>
+  </div>
+
+  <!-- 核心觀念 -->
+  <div class="sec"><div class="bar"></div><h2>💡 核心觀念</h2></div>
+  <div class="golden">
+    <strong>「很像」不等於「最對」——Re-Rank 正是用來補這個差距。</strong>向量相似度衡量的是方向接近，CrossEncoder Re-Rank 衡量的是語意相關性，兩者目標不同，需要搭配使用。
+  </div>
+  <div class="golden">
+    <strong>Re-Rank 時，輸入「標題 + 內文」效果優於單一欄位。</strong>讓模型同時看到識別標籤（標題）與語意內容（內文），排序結果更符合預期。
+  </div>
+  <div class="golden">
+    <strong>Multi-Query 解決「使用者不會精確表達」的問題。</strong>用 LLM 把模糊查詢改寫成多個具體查詢，擴大召回範圍，再用 Re-Rank 精選最終結果。
+  </div>
+  <div class="warn-box">
+    <strong>⚠ Re-Rank 模型必須選對語言。</strong>英文模型用於中文排序，效果不可信。中文環境推薦使用 BAAI/BGE 系列模型，可在 HuggingFace 取得。
+  </div>
+
+  <!-- 策略總覽表 -->
+  <div class="sec"><div class="bar"></div><h2>📋 三種 Retrieval 策略與 RAGAS 評估對照</h2></div>
+  <div class="tbl-wrap">
+    <table class="sum-table">
+      <thead>
+        <tr><th>策略</th><th>流程</th><th>優點</th><th>適合場景</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="chip">Vector → Re-Rank</span></td>
+          <td>向量初篩 → CrossEncoder 精排</td>
+          <td>實作簡單，效果明顯提升</td>
+          <td>一般問答、推薦系統</td>
+        </tr>
+        <tr>
+          <td><span class="chip">Hybrid → Re-Rank</span></td>
+          <td>向量 + BM25 合併 → Re-Rank</td>
+          <td>同時兼顧語意與精準關鍵字</td>
+          <td>含專有名詞、法規條文查詢</td>
+        </tr>
+        <tr>
+          <td><span class="chip">Multi-Query → Re-Rank</span></td>
+          <td>LLM 改寫 → 多路查詢 → Re-Rank</td>
+          <td>應對模糊口語化查詢，召回率高</td>
+          <td>使用者輸入不精確的場景</td>
+        </tr>
+        <tr>
+          <td><span class="chip">RAGAS 評估</span></td>
+          <td>四指標：正確性/相關性/精準率/召回率</td>
+          <td>量化 RAG 品質，找出瓶頸層</td>
+          <td>所有 RAG 系統上線前的評估</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+</main>
+
+<footer>
+  整理自 <strong>張維元 ── RAG 精準搜尋實戰 03-05</strong>｜二階檢索與 Re-Rank 排序機制實作
+</footer>
+
+</body>
+</html>

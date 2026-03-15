@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>向量資料庫的 CRUD — ChromaDB × Pinecone × LangChain 實作</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --navy:       #1a2332;
+      --navy-mid:   #22304a;
+      --navy-dark:  #0d1824;
+      --teal:       #2d8b8b;
+      --teal-light: #3aabab;
+      --seafoam:    #a8dadc;
+      --cream:      #f1faee;
+      --white:      #ffffff;
+      --amber:      #e8a14a;
+      --green:      #6bcb77;
+      --red:        #e06c75;
+      --purple:     #b39ddb;
+    }
+    body { font-family: 'Noto Sans TC', sans-serif; background: var(--navy); color: var(--cream); line-height: 1.7; }
+
+    /* ── HERO ── */
+    header {
+      background: linear-gradient(135deg, #0d1824 0%, var(--navy-mid) 55%, #193e3e 100%);
+      padding: 64px 40px 52px; text-align: center; position: relative; overflow: hidden;
+    }
+    header::before {
+      content: ''; position: absolute; inset: 0;
+      background:
+        radial-gradient(ellipse 55% 45% at 15% 85%, rgba(45,139,139,.22) 0%, transparent 65%),
+        radial-gradient(ellipse 45% 55% at 85% 15%, rgba(168,218,220,.11) 0%, transparent 65%);
+    }
+    .badge { display: inline-block; background: rgba(45,139,139,.25); border: 1px solid var(--teal); color: var(--seafoam); font-size: .72rem; font-weight: 700; letter-spacing: .14em; padding: 5px 16px; border-radius: 20px; margin-bottom: 18px; position: relative; }
+    header h1 { font-size: clamp(1.7rem,4vw,2.75rem); font-weight: 900; color: var(--white); line-height: 1.25; position: relative; margin-bottom: 14px; }
+    header h1 span { color: var(--seafoam); }
+    header p.subtitle { font-size: .94rem; color: rgba(241,250,238,.6); max-width: 620px; margin: 0 auto; position: relative; }
+
+    main { max-width: 980px; margin: 0 auto; padding: 52px 24px 80px; }
+
+    .sec { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; margin-top: 52px; }
+    .sec:first-child { margin-top: 0; }
+    .sec .bar { width: 4px; height: 26px; background: linear-gradient(180deg, var(--teal), var(--seafoam)); border-radius: 2px; flex-shrink: 0; }
+    .sec h2 { font-size: 1.2rem; font-weight: 700; color: var(--seafoam); letter-spacing: .04em; }
+
+    .intro { background: linear-gradient(135deg, var(--navy-mid), #1d3a3a); border: 1px solid rgba(45,139,139,.4); border-radius: 16px; padding: 26px 32px; font-size: .95rem; color: rgba(241,250,238,.82); }
+    .intro strong { color: var(--seafoam); }
+
+    /* ── CRUD OVERVIEW ── */
+    .crud-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+    @media(max-width:640px){ .crud-grid { grid-template-columns: repeat(2, 1fr); } }
+    .crud-card {
+      border-radius: 14px; padding: 20px 18px; text-align: center;
+      transition: transform .15s;
+    }
+    .crud-card:hover { transform: translateY(-3px); }
+    .c-create { background: rgba(107,203,119,.1);  border: 1px solid rgba(107,203,119,.35); }
+    .c-read   { background: rgba(45,139,139,.12);  border: 1px solid rgba(45,139,139,.4); }
+    .c-update { background: rgba(232,161,74,.1);   border: 1px solid rgba(232,161,74,.35); }
+    .c-delete { background: rgba(224,108,117,.1);  border: 1px solid rgba(224,108,117,.35); }
+    .crud-card .cc-letter { font-family: 'JetBrains Mono', monospace; font-size: 2rem; font-weight: 700; margin-bottom: 6px; line-height: 1; }
+    .c-create .cc-letter { color: var(--green); }
+    .c-read   .cc-letter { color: var(--seafoam); }
+    .c-update .cc-letter { color: var(--amber); }
+    .c-delete .cc-letter { color: var(--red); }
+    .crud-card .cc-word   { font-size: .78rem; font-weight: 700; letter-spacing: .08em; margin-bottom: 6px; }
+    .c-create .cc-word { color: rgba(107,203,119,.8); }
+    .c-read   .cc-word { color: rgba(168,218,220,.8); }
+    .c-update .cc-word { color: rgba(232,161,74,.8); }
+    .c-delete .cc-word { color: rgba(224,108,117,.8); }
+    .crud-card .cc-method {
+      font-family: 'JetBrains Mono', monospace; font-size: .73rem;
+      background: rgba(255,255,255,.06); border-radius: 5px; padding: 3px 8px; margin-bottom: 6px;
+      display: inline-block; color: rgba(241,250,238,.75);
+    }
+    .crud-card .cc-desc { font-size: .8rem; color: rgba(241,250,238,.6); }
+
+    /* ── TWO DB COMPARE ── */
+    .db-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media(max-width:620px){ .db-compare { grid-template-columns: 1fr; } }
+    .dbc-card { background: var(--navy-mid); border-radius: 14px; overflow: hidden; border: 1px solid rgba(45,139,139,.22); }
+    .dbc-card .dc-head { padding: 14px 20px; border-bottom: 1px solid rgba(45,139,139,.15); }
+    .dbc-card.local .dc-head { background: rgba(107,203,119,.08); }
+    .dbc-card.cloud .dc-head { background: rgba(45,139,139,.12); }
+    .dc-head .dh-icon { font-size: 1.4rem; }
+    .dc-head .dh-name { font-size: .95rem; font-weight: 700; color: var(--white); }
+    .dc-head .dh-tag  { font-size: .7rem; font-weight: 700; letter-spacing: .1em; margin-top: 2px; }
+    .dbc-card.local .dh-tag { color: var(--green); }
+    .dbc-card.cloud .dh-tag { color: var(--teal-light); }
+    .dbc-card .dc-body { padding: 16px 20px; }
+    .dbc-card .dc-body p { font-size: .86rem; color: rgba(241,250,238,.68); margin-bottom: 8px; }
+    .dbc-card .dc-body p:last-child { margin-bottom: 0; }
+    .dbc-card .dc-body ul { list-style: none; }
+    .dbc-card .dc-body ul li { font-size: .84rem; color: rgba(241,250,238,.68); padding: 3px 0 3px 16px; position: relative; }
+    .dbc-card .dc-body ul li::before { content: '·'; position: absolute; left: 4px; color: var(--teal-light); font-size: 1.1rem; line-height: 1.4; }
+
+    /* ── CODE BLOCK ── */
+    .code-wrap { background: var(--navy-dark); border: 1px solid rgba(45,139,139,.3); border-radius: 10px; overflow-x: auto; margin-top: 10px; }
+    .code-title {
+      background: rgba(45,139,139,.18); padding: 7px 16px; font-size: .7rem;
+      color: var(--teal-light); font-family: 'JetBrains Mono', monospace;
+      letter-spacing: .06em; border-bottom: 1px solid rgba(45,139,139,.2);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .ct-badge { font-size: .65rem; padding: 1px 8px; border-radius: 10px; font-weight: 700; }
+    .ct-local { background: rgba(107,203,119,.2); color: var(--green); }
+    .ct-cloud { background: rgba(45,139,139,.3);  color: var(--seafoam); }
+    .ct-lc    { background: rgba(179,157,219,.2); color: var(--purple); }
+    pre { font-family: 'JetBrains Mono', monospace; font-size: .79rem; line-height: 1.7; color: #c8d8e8; padding: 16px 20px; white-space: pre; }
+    .kw  { color: #58a6ff; }
+    .fn  { color: #79c0ff; }
+    .str { color: #a5d6a7; }
+    .cm  { color: #5a7490; font-style: italic; }
+    .num { color: #ffa657; }
+    .cls { color: #ffd700; }
+
+    /* ── UPSERT EXPLAIN ── */
+    .upsert-card {
+      background: var(--navy-mid); border: 1px solid rgba(45,139,139,.25); border-radius: 14px;
+      padding: 22px 24px; display: grid; grid-template-columns: 1fr auto 1fr; gap: 16px; align-items: center;
+    }
+    @media(max-width:600px){ .upsert-card { grid-template-columns: 1fr; } }
+    .uc-side { text-align: center; }
+    .uc-side .us-label { font-size: .7rem; font-weight: 700; letter-spacing: .1em; margin-bottom: 8px; }
+    .uc-side .us-icon  { font-size: 1.8rem; margin-bottom: 6px; }
+    .uc-side h4 { font-size: .92rem; font-weight: 700; color: var(--white); margin-bottom: 6px; }
+    .uc-side p  { font-size: .83rem; color: rgba(241,250,238,.65); }
+    .us-insert .us-label { color: var(--green); }
+    .us-update .us-label { color: var(--amber); }
+    .uc-plus { font-size: 1.8rem; color: rgba(45,139,139,.5); font-weight: 700; text-align: center; }
+    .upsert-result {
+      background: rgba(168,218,220,.08); border: 1px solid rgba(168,218,220,.25);
+      border-radius: 10px; padding: 14px 18px; margin-top: 14px; text-align: center;
+      font-size: .88rem; color: var(--seafoam); font-weight: 600;
+    }
+
+    /* ── APPROACH TABS ── */
+    .approach-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    @media(max-width:640px){ .approach-grid { grid-template-columns: 1fr; } }
+    .ap-card { background: var(--navy-mid); border-radius: 14px; overflow: hidden; border: 1px solid rgba(45,139,139,.22); transition: border-color .2s; }
+    .ap-card:hover { border-color: var(--teal); }
+    .ap-card .ap-head { padding: 13px 18px; font-size: .75rem; font-weight: 700; letter-spacing: .08em; border-bottom: 1px solid rgba(45,139,139,.12); }
+    .ap-card.raw   .ap-head { background: rgba(232,161,74,.08);  color: var(--amber);  }
+    .ap-card.lc    .ap-head { background: rgba(179,157,219,.08); color: var(--purple); }
+    .ap-card.both  .ap-head { background: rgba(45,139,139,.1);   color: var(--seafoam);}
+    .ap-card .ap-body { padding: 16px 18px; }
+    .ap-card .ap-body p  { font-size: .86rem; color: rgba(241,250,238,.68); margin-bottom: 8px; }
+    .ap-card .ap-body .ap-pro { font-size: .79rem; color: var(--green);  margin-top: 6px; }
+    .ap-card .ap-body .ap-con { font-size: .79rem; color: var(--amber);  margin-top: 4px; }
+    .ap-card .ap-api {
+      font-family: 'JetBrains Mono', monospace; font-size: .75rem;
+      background: var(--navy-dark); border-radius: 7px; padding: 8px 12px; margin-top: 8px;
+      color: rgba(241,250,238,.7); line-height: 1.6;
+    }
+
+    /* ── METADATA TIP ── */
+    .meta-card { background: var(--navy-mid); border: 1px solid rgba(45,139,139,.25); border-radius: 14px; padding: 22px 26px; }
+    .meta-card h4 { font-size: .95rem; font-weight: 700; color: var(--white); margin-bottom: 10px; }
+    .meta-card p  { font-size: .875rem; color: rgba(241,250,238,.7); margin-bottom: 12px; }
+    .meta-fields { display: flex; flex-wrap: wrap; gap: 8px; }
+    .mf { font-family: 'JetBrains Mono', monospace; font-size: .78rem; padding: 4px 12px; border-radius: 6px; background: rgba(45,139,139,.15); border: 1px solid rgba(45,139,139,.35); color: var(--seafoam); }
+
+    /* ── GOLDEN ── */
+    .golden { background: rgba(45,139,139,.1); border-left: 4px solid var(--teal); border-radius: 0 12px 12px 0; padding: 18px 26px; font-size: .93rem; color: rgba(241,250,238,.85); margin-bottom: 12px; }
+    .golden strong { color: var(--seafoam); }
+    .warn-box { background: rgba(232,161,74,.08); border-left: 4px solid var(--amber); border-radius: 0 12px 12px 0; padding: 16px 22px; font-size: .88rem; color: rgba(241,250,238,.8); margin-bottom: 12px; }
+    .warn-box strong { color: var(--amber); }
+
+    /* ── SUMMARY TABLE ── */
+    .tbl-wrap { overflow-x: auto; border-radius: 12px; border: 1px solid rgba(45,139,139,.25); }
+    .sum-table { width: 100%; border-collapse: collapse; }
+    .sum-table th { background: rgba(45,139,139,.25); color: var(--seafoam); font-size: .8rem; font-weight: 700; letter-spacing: .05em; padding: 11px 16px; text-align: left; border-bottom: 2px solid var(--teal); }
+    .sum-table td { padding: 11px 16px; font-size: .855rem; color: rgba(241,250,238,.78); border-bottom: 1px solid rgba(45,139,139,.15); vertical-align: top; }
+    .sum-table tr:last-child td { border-bottom: none; }
+    .sum-table tr:nth-child(odd) td { background: rgba(255,255,255,.025); }
+    .chip { display: inline-block; background: rgba(45,139,139,.2); border: 1px solid rgba(45,139,139,.4); color: var(--seafoam); font-size: .75rem; font-weight: 600; border-radius: 6px; padding: 2px 9px; font-family: 'JetBrains Mono', monospace; }
+
+    footer { text-align: center; padding: 30px 24px; border-top: 1px solid rgba(45,139,139,.2); font-size: .78rem; color: rgba(241,250,238,.3); }
+    footer strong { color: var(--teal-light); }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="badge">🛠️ 實作單元整理</div>
+  <h1>向量資料庫的 <span>CRUD</span></h1>
+  <p class="subtitle">張維元 ── RAG 精準搜尋實戰 03-03 | ChromaDB（本地端）× Pinecone（雲端）× LangChain（封裝）三種操作方式完整實作</p>
+</header>
+
+<main>
+
+  <!-- CRUD 總覽 -->
+  <div class="sec"><div class="bar"></div><h2>📋 CRUD 四個操作對應向量資料庫</h2></div>
+  <div class="intro" style="margin-bottom:20px">
+    向量資料庫的操作邏輯與一般關聯式資料庫相同，都支援 <strong>Create / Read / Update / Delete</strong> 四種基本操作，差別只在於存的是<strong>向量（Embedding 編碼後的結果）</strong>而非一般欄位資料。
+  </div>
+  <div class="crud-grid">
+    <div class="crud-card c-create">
+      <div class="cc-letter">C</div>
+      <div class="cc-word">CREATE</div>
+      <div class="cc-method">add() / upsert()</div>
+      <div class="cc-desc">新增向量資料與對應的 Metadata 到資料庫</div>
+    </div>
+    <div class="crud-card c-read">
+      <div class="cc-letter">R</div>
+      <div class="cc-word">READ</div>
+      <div class="cc-method">query() / get()</div>
+      <div class="cc-desc">依相似度搜尋 Top-K，或指定 ID 取出特定資料</div>
+    </div>
+    <div class="crud-card c-update">
+      <div class="cc-letter">U</div>
+      <div class="cc-word">UPDATE</div>
+      <div class="cc-method">upsert()</div>
+      <div class="cc-desc">更新既有向量或 Metadata；若 ID 不存在則自動新增</div>
+    </div>
+    <div class="crud-card c-delete">
+      <div class="cc-letter">D</div>
+      <div class="cc-word">DELETE</div>
+      <div class="cc-method">delete()</div>
+      <div class="cc-desc">依 ID 或條件刪除指定的向量資料</div>
+    </div>
+  </div>
+
+  <!-- 兩種資料庫對比 -->
+  <div class="sec"><div class="bar"></div><h2>🗄️ 本地端 vs 雲端：兩種向量資料庫選型</h2></div>
+  <div class="db-compare">
+    <div class="dbc-card local">
+      <div class="dc-head">
+        <div class="dh-icon">💻</div>
+        <div class="dh-name">ChromaDB</div>
+        <div class="dh-tag">LOCAL — 本地端輕量資料庫</div>
+      </div>
+      <div class="dc-body">
+        <p>基於 <strong>SQLite</strong> 的本地端向量資料庫，安裝即用，資料存於本機路徑，無需額外基礎設施。</p>
+        <ul>
+          <li>適合 Prototype、本機開發</li>
+          <li>自行指定本地端資料夾路徑</li>
+          <li><strong>無內建 Embedding</strong>，需自行提供 Embedding Function（如 OpenAI API）</li>
+          <li>免費，零雲端成本</li>
+        </ul>
+      </div>
+    </div>
+    <div class="dbc-card cloud">
+      <div class="dc-head">
+        <div class="dh-icon">☁️</div>
+        <div class="dh-name">Pinecone</div>
+        <div class="dh-tag">CLOUD — 雲端 SaaS 向量資料庫</div>
+      </div>
+      <div class="dc-body">
+        <p>基於 <strong>AWS / GCP / Azure</strong> 的雲端向量資料庫服務，API Key 認證後直接使用。</p>
+        <ul>
+          <li>適合上線封測、中小型生產環境</li>
+          <li>內建 Embedding 模型，可直接傳文字查詢</li>
+          <li>Index = 你的資料庫，可管理多個</li>
+          <li>付費服務，有免費額度</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ChromaDB CRUD 程式碼 -->
+  <div class="sec"><div class="bar"></div><h2>💻 ChromaDB 本地端 CRUD 實作</h2></div>
+
+  <div style="font-size:.8rem;font-weight:700;color:var(--green);letter-spacing:.06em;margin-bottom:8px">C — CREATE：建立資料庫並新增向量</div>
+  <div class="code-wrap">
+    <div class="code-title">Python — ChromaDB Create <span class="ct-badge ct-local">LOCAL</span></div>
+    <pre><span class="kw">import</span> chromadb
+<span class="kw">import</span> numpy <span class="kw">as</span> np
+
+<span class="cm"># 建立本地端 ChromaDB（指定儲存路徑）</span>
+client = chromadb.<span class="fn">PersistentClient</span>(path=<span class="str">"./chroma_db"</span>)
+collection = client.<span class="fn">get_or_create_collection</span>(<span class="str">"my_collection"</span>)
+
+<span class="cm"># 模擬一個 128 維向量（實際應由 Embedding 模型產生）</span>
+fake_vector = np.random.<span class="fn">rand</span>(<span class="num">128</span>).<span class="fn">tolist</span>()
+
+<span class="cm"># 新增向量資料，附帶 ID 與 Metadata</span>
+collection.<span class="fn">add</span>(
+    ids=[<span class="str">"doc_001"</span>],
+    embeddings=[fake_vector],
+    metadatas=[{<span class="str">"source"</span>: <span class="str">"numpy"</span>, <span class="str">"category"</span>: <span class="str">"test"</span>}],
+    documents=[<span class="str">"這是一筆測試文件"</span>]
+)</pre>
+  </div>
+
+  <div style="font-size:.8rem;font-weight:700;color:var(--seafoam);letter-spacing:.06em;margin:16px 0 8px">R — READ：相似度查詢 + 指定 ID 取出</div>
+  <div class="code-wrap">
+    <div class="code-title">Python — ChromaDB Read <span class="ct-badge ct-local">LOCAL</span></div>
+    <pre><span class="cm"># 相似度查詢：取出最像的前 3 筆</span>
+results = collection.<span class="fn">query</span>(
+    query_embeddings=[fake_vector],
+    n_results=<span class="num">3</span>
+)
+<span class="cm"># → 回傳按相似度排序的結果（ID、距離、Metadata、文件）</span>
+
+<span class="cm"># 指定 ID 取出：精準查詢特定資料</span>
+item = collection.<span class="fn">get</span>(ids=[<span class="str">"doc_001"</span>])
+
+<span class="cm"># 取出第一筆（不指定 ID）</span>
+first = collection.<span class="fn">get</span>(limit=<span class="num">1</span>)</pre>
+  </div>
+
+  <div style="font-size:.8rem;font-weight:700;color:var(--amber);letter-spacing:.06em;margin:16px 0 8px">U — UPDATE：使用 upsert 更新資料</div>
+  <div class="code-wrap">
+    <div class="code-title">Python — ChromaDB Update (Upsert) <span class="ct-badge ct-local">LOCAL</span></div>
+    <pre><span class="cm"># Upsert = Update + Insert 合一</span>
+<span class="cm"># 若 ID 已存在 → 更新；若不存在 → 新增</span>
+new_vector = np.random.<span class="fn">rand</span>(<span class="num">128</span>).<span class="fn">tolist</span>()
+
+collection.<span class="fn">upsert</span>(
+    ids=[<span class="str">"doc_001"</span>],
+    embeddings=[new_vector],
+    metadatas=[{<span class="str">"source"</span>: <span class="str">"update_numpy"</span>}],  <span class="cm"># Metadata 同步更新</span>
+    documents=[<span class="str">"更新後的文件內容"</span>]
+)
+<span class="cm"># 更新後重新 query → 結果會指向新的向量</span></pre>
+  </div>
+
+  <!-- Upsert 說明 -->
+  <div class="upsert-card" style="margin-top:16px">
+    <div class="uc-side us-insert">
+      <div class="us-label">INSERT</div>
+      <div class="us-icon">➕</div>
+      <h4>ID 不存在時</h4>
+      <p>自動新增一筆資料</p>
+    </div>
+    <div class="uc-plus">+</div>
+    <div class="uc-side us-update">
+      <div class="us-label">UPDATE</div>
+      <div class="us-icon">✏️</div>
+      <h4>ID 已存在時</h4>
+      <p>自動更新現有資料（向量與 Metadata）</p>
+    </div>
+  </div>
+  <div class="upsert-result">
+    💡 <strong>Upsert</strong> = 現代向量資料庫普遍採用的方式，用一個操作取代傳統的「先查是否存在、再決定 Insert 或 Update」兩步流程
+  </div>
+
+  <!-- Pinecone CRUD 程式碼 -->
+  <div class="sec"><div class="bar"></div><h2>☁️ Pinecone 雲端 CRUD 實作</h2></div>
+  <div class="code-wrap">
+    <div class="code-title">Python — Pinecone CRUD 完整範例 <span class="ct-badge ct-cloud">CLOUD</span></div>
+    <pre><span class="kw">from</span> pinecone <span class="kw">import</span> <span class="cls">Pinecone</span>
+<span class="kw">import</span> numpy <span class="kw">as</span> np
+
+<span class="cm"># 初始化 Pinecone（API Key 認證）</span>
+pc = <span class="cls">Pinecone</span>(api_key=<span class="str">"YOUR_API_KEY"</span>)
+
+<span class="cm"># 列出所有 Index（類似列出所有資料庫）</span>
+<span class="fn">print</span>(pc.<span class="fn">list_indexes</span>())
+
+<span class="cm"># 連接指定 Index</span>
+index = pc.<span class="cls">Index</span>(<span class="str">"my-index"</span>)
+
+<span class="cm"># CREATE：新增向量（ID + 向量值 + Metadata）</span>
+vector = np.random.<span class="fn">rand</span>(<span class="num">128</span>).<span class="fn">tolist</span>()
+index.<span class="fn">upsert</span>(vectors=[{
+    <span class="str">"id"</span>:     <span class="str">"1021"</span>,
+    <span class="str">"values"</span>: vector,
+    <span class="str">"metadata"</span>: {<span class="str">"source"</span>: <span class="str">"numpy"</span>}
+}])
+
+<span class="cm"># READ：用 ID 取出（values 預設遮蔽，需 fetch 展開）</span>
+result = index.<span class="fn">fetch</span>(ids=[<span class="str">"1021"</span>])
+<span class="fn">print</span>(result.vectors[<span class="str">"1021"</span>].values)  <span class="cm"># 展開後的向量值</span>
+
+<span class="cm"># UPDATE：用 upsert 更新 Metadata</span>
+index.<span class="fn">upsert</span>(vectors=[{
+    <span class="str">"id"</span>:     <span class="str">"1021"</span>,
+    <span class="str">"values"</span>: np.random.<span class="fn">rand</span>(<span class="num">128</span>).<span class="fn">tolist</span>(),
+    <span class="str">"metadata"</span>: {<span class="str">"source"</span>: <span class="str">"update_numpy"</span>}
+}])
+
+<span class="cm"># 語意查詢：傳入向量，找最相似的前 3 筆</span>
+search_result = index.<span class="fn">query</span>(
+    vector=vector,
+    top_k=<span class="num">3</span>,
+    include_metadata=<span class="kw">True</span>
+)</pre>
+  </div>
+  <div class="warn-box" style="margin-top:14px">
+    <strong>⚠ Pinecone 的 values 預設遮蔽：</strong>直接 <code style="font-family:'JetBrains Mono';font-size:.82rem">get()</code> 時向量值會被隱藏，需改用 <code style="font-family:'JetBrains Mono';font-size:.82rem">fetch()</code> 並展開才能看到原始向量數值。
+  </div>
+
+  <!-- Pinecone 語意搜尋示範 -->
+  <div style="margin-top:14px">
+    <div style="font-size:.8rem;font-weight:700;color:var(--teal-light);letter-spacing:.06em;margin-bottom:8px">Pinecone 搭配 Embedding：文字 → 向量 → 語意搜尋</div>
+    <div class="code-wrap">
+      <div class="code-title">Python — 文字 Embedding 後存入 Pinecone，再做語意查詢 <span class="ct-badge ct-cloud">CLOUD</span></div>
+      <pre><span class="kw">from</span> openai <span class="kw">import</span> <span class="cls">OpenAI</span>
+client = <span class="cls">OpenAI</span>()
+
+<span class="cm"># 文字資料 → Embedding → 存入 Pinecone</span>
+documents = [
+    <span class="str">"Apple is a technology company"</span>,
+    <span class="str">"Google dominates search engines"</span>,
+    <span class="str">"Apple is also a fruit"</span>,
+    <span class="str">"Microsoft builds operating systems"</span>,
+    <span class="str">"Amazon leads cloud computing"</span>,
+]
+
+<span class="kw">for</span> i, doc <span class="kw">in</span> <span class="fn">enumerate</span>(documents):
+    vec = client.embeddings.<span class="fn">create</span>(input=doc, model=<span class="str">"text-embedding-ada-002"</span>)
+    index.<span class="fn">upsert</span>(vectors=[{<span class="str">"id"</span>: <span class="fn">str</span>(i), <span class="str">"values"</span>: vec.data[<span class="num">0</span>].embedding}])
+
+<span class="cm"># 查詢：「跟 Apple 有關的有名公司是什麼？」</span>
+query_vec = client.embeddings.<span class="fn">create</span>(
+    input=<span class="str">"Which famous company is related to Apple?"</span>,
+    model=<span class="str">"text-embedding-ada-002"</span>
+).data[<span class="num">0</span>].embedding
+
+results = index.<span class="fn">query</span>(vector=query_vec, top_k=<span class="num">3</span>)
+<span class="cm"># → 找出前 3 筆最相關（但若無 threshold，水果 Apple 也可能混入）</span></pre>
+    </div>
+  </div>
+
+  <!-- LangChain 封裝 -->
+  <div class="sec"><div class="bar"></div><h2>🔗 LangChain 封裝：更簡潔的操作方式</h2></div>
+  <div class="code-wrap">
+    <div class="code-title">Python — LangChain 封裝 ChromaDB / Pinecone <span class="ct-badge ct-lc">LANGCHAIN</span></div>
+    <pre><span class="kw">from</span> langchain_community.vectorstores <span class="kw">import</span> <span class="cls">Chroma</span>, <span class="cls">Pinecone</span>
+<span class="kw">from</span> langchain_openai <span class="kw">import</span> <span class="cls">OpenAIEmbeddings</span>
+
+embeddings = <span class="cls">OpenAIEmbeddings</span>()
+
+<span class="cm"># ── ChromaDB 版本 ──────────────────────────────</span>
+<span class="cm"># Add Documents：自動 Embedding + 存入資料庫</span>
+vectorstore_chroma = <span class="cls">Chroma</span>.<span class="fn">from_documents</span>(
+    documents=docs,
+    embedding=embeddings,
+    persist_directory=<span class="str">"./chroma_db"</span>
+)
+
+<span class="cm"># Similarity Search：自動 Embedding 查詢 + 相似度排序</span>
+results = vectorstore_chroma.<span class="fn">similarity_search</span>(<span class="str">"Apple 相關公司"</span>, k=<span class="num">3</span>)
+
+<span class="cm"># ── Pinecone 版本 ──────────────────────────────</span>
+vectorstore_pinecone = <span class="cls">Pinecone</span>.<span class="fn">from_documents</span>(
+    documents=docs,
+    embedding=embeddings,
+    index_name=<span class="str">"my-index"</span>
+)
+results = vectorstore_pinecone.<span class="fn">similarity_search</span>(<span class="str">"Apple 相關公司"</span>, k=<span class="num">3</span>)</pre>
+  </div>
+
+  <!-- 三種操作方式對比 -->
+  <div class="sec"><div class="bar"></div><h2>⚖️ 三種操作方式的選擇</h2></div>
+  <div class="approach-grid">
+    <div class="ap-card raw">
+      <div class="ap-head">🔧 原生 SDK（土炮）</div>
+      <div class="ap-body">
+        <p>直接使用 ChromaDB / Pinecone 的官方 SDK 操作，自行管理 Embedding 流程。</p>
+        <div class="ap-api">collection.add(...)<br>collection.query(...)<br>collection.upsert(...)</div>
+        <div class="ap-pro">✓ 完全掌控，彈性最高</div>
+        <div class="ap-con">⚠ 需自己處理 Embedding 邏輯，程式碼較多</div>
+      </div>
+    </div>
+    <div class="ap-card lc">
+      <div class="ap-head">🔗 LangChain 封裝</div>
+      <div class="ap-body">
+        <p>透過 LangChain 統一介面，自動整合 Embedding 與資料庫操作。</p>
+        <div class="ap-api">from_documents(docs)<br>similarity_search(query)<br>add_documents(docs)</div>
+        <div class="ap-pro">✓ 程式碼簡潔，兩行完成</div>
+        <div class="ap-con">⚠ 彈性稍低，需依賴 LangChain 版本</div>
+      </div>
+    </div>
+    <div class="ap-card both">
+      <div class="ap-head">✅ 建議策略</div>
+      <div class="ap-body">
+        <p>初學 / 理解原理 → 用原生 SDK。快速開發 / 接入 RAG Pipeline → 用 LangChain 封裝。</p>
+        <div class="ap-api">理解底層 → 原生 SDK<br>快速接入 → LangChain<br>生產環境 → 視需求</div>
+        <div class="ap-pro">✓ 兩者可互換，底層邏輯相同</div>
+        <div class="ap-con">⚠ LangChain 版本更新快，注意 API 變動</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Metadata 說明 -->
+  <div class="sec"><div class="bar"></div><h2>🏷️ Metadata 的重要性</h2></div>
+  <div class="meta-card">
+    <h4>每筆向量可附帶 Metadata 進行額外標記與篩選</h4>
+    <p>Metadata 讓你在做語意搜尋的同時，可以疊加<strong>精準條件篩選</strong>（類似 SQL WHERE），在模糊搜尋的基礎上增加精確控制。</p>
+    <div class="meta-fields">
+      <span class="mf">source: "pdf"</span>
+      <span class="mf">category: "技術文件"</span>
+      <span class="mf">author: "張維元"</span>
+      <span class="mf">date: "2024-01"</span>
+      <span class="mf">language: "zh-TW"</span>
+      <span class="mf">chapter: 3</span>
+    </div>
+    <div style="margin-top:12px;font-size:.84rem;color:rgba(241,250,238,.65)">
+      例如：只搜尋 <code style="font-family:'JetBrains Mono';font-size:.8rem;color:var(--teal-light)">source="pdf"</code> 且 <code style="font-family:'JetBrains Mono';font-size:.8rem;color:var(--teal-light)">language="zh-TW"</code> 的 Chunk，實現「語意模糊 + 條件精準」的混合查詢。
+    </div>
+  </div>
+
+  <!-- 核心觀念 -->
+  <div class="sec"><div class="bar"></div><h2>💡 核心觀念</h2></div>
+  <div class="golden">
+    <strong>向量資料庫的 CRUD 和一般資料庫概念完全相同，差異只在於存的是向量。</strong>理解 CRUD 操作是將 Embedding 文件整合進 RAG Pipeline 的基礎技能。
+  </div>
+  <div class="golden">
+    <strong>Upsert = Insert + Update 合一</strong>，是現代向量資料庫的主流操作方式。不需要先查再決定操作，一個 upsert 搞定所有寫入場景。
+  </div>
+  <div class="warn-box">
+    <strong>⚠ 沒有 Threshold 的語意搜尋會找到「最像但不相關」的結果。</strong>如查詢「Apple 相關公司」，第三筆可能返回「Apple 是一種水果」——搜尋結果必須搭配相似度閾值過濾，才能確保品質。
+  </div>
+
+  <!-- 快速對照表 -->
+  <div class="sec"><div class="bar"></div><h2>📋 ChromaDB vs Pinecone 操作對照</h2></div>
+  <div class="tbl-wrap">
+    <table class="sum-table">
+      <thead>
+        <tr><th>操作</th><th>ChromaDB（本地端）</th><th>Pinecone（雲端）</th><th>LangChain 封裝</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>初始化</strong></td>
+          <td><span class="chip">PersistentClient(path)</span></td>
+          <td><span class="chip">Pinecone(api_key)</span></td>
+          <td><span class="chip">from_documents()</span></td>
+        </tr>
+        <tr>
+          <td><strong>新增資料</strong></td>
+          <td><span class="chip">collection.add()</span></td>
+          <td><span class="chip">index.upsert()</span></td>
+          <td><span class="chip">add_documents()</span></td>
+        </tr>
+        <tr>
+          <td><strong>語意查詢</strong></td>
+          <td><span class="chip">collection.query()</span></td>
+          <td><span class="chip">index.query()</span></td>
+          <td><span class="chip">similarity_search()</span></td>
+        </tr>
+        <tr>
+          <td><strong>ID 查詢</strong></td>
+          <td><span class="chip">collection.get(ids)</span></td>
+          <td><span class="chip">index.fetch(ids)</span></td>
+          <td>需用原生 SDK</td>
+        </tr>
+        <tr>
+          <td><strong>更新資料</strong></td>
+          <td><span class="chip">collection.upsert()</span></td>
+          <td><span class="chip">index.upsert()</span></td>
+          <td><span class="chip">add_documents()</span></td>
+        </tr>
+        <tr>
+          <td><strong>Embedding</strong></td>
+          <td>需自行提供（如 OpenAI）</td>
+          <td>可用內建或自行提供</td>
+          <td>統一由 LangChain 管理</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+</main>
+
+<footer>
+  整理自 <strong>張維元 ── RAG 精準搜尋實戰 03-03</strong>｜向量資料庫的 CRUD 實作
+</footer>
+
+</body>
+</html>

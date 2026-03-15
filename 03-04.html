@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Retrieval 算法策略比較 — 向量搜尋 × Hybrid × Multi-Stage</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --navy:       #1a2332;
+      --navy-mid:   #22304a;
+      --navy-dark:  #0d1824;
+      --teal:       #2d8b8b;
+      --teal-light: #3aabab;
+      --seafoam:    #a8dadc;
+      --cream:      #f1faee;
+      --white:      #ffffff;
+      --amber:      #e8a14a;
+      --green:      #6bcb77;
+      --red:        #e06c75;
+      --purple:     #b39ddb;
+    }
+    body { font-family: 'Noto Sans TC', sans-serif; background: var(--navy); color: var(--cream); line-height: 1.7; }
+
+    header {
+      background: linear-gradient(135deg, #0d1824 0%, var(--navy-mid) 55%, #193e3e 100%);
+      padding: 64px 40px 52px; text-align: center; position: relative; overflow: hidden;
+    }
+    header::before {
+      content: ''; position: absolute; inset: 0;
+      background:
+        radial-gradient(ellipse 55% 45% at 15% 85%, rgba(45,139,139,.22) 0%, transparent 65%),
+        radial-gradient(ellipse 45% 55% at 85% 15%, rgba(168,218,220,.11) 0%, transparent 65%);
+    }
+    .badge { display: inline-block; background: rgba(45,139,139,.25); border: 1px solid var(--teal); color: var(--seafoam); font-size: .72rem; font-weight: 700; letter-spacing: .14em; padding: 5px 16px; border-radius: 20px; margin-bottom: 18px; position: relative; }
+    header h1 { font-size: clamp(1.7rem,4vw,2.75rem); font-weight: 900; color: var(--white); line-height: 1.25; position: relative; margin-bottom: 14px; }
+    header h1 span { color: var(--seafoam); }
+    header p.subtitle { font-size: .94rem; color: rgba(241,250,238,.6); max-width: 640px; margin: 0 auto; position: relative; }
+
+    main { max-width: 980px; margin: 0 auto; padding: 52px 24px 80px; }
+
+    .sec { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; margin-top: 52px; }
+    .sec:first-child { margin-top: 0; }
+    .sec .bar { width: 4px; height: 26px; background: linear-gradient(180deg, var(--teal), var(--seafoam)); border-radius: 2px; flex-shrink: 0; }
+    .sec h2 { font-size: 1.2rem; font-weight: 700; color: var(--seafoam); letter-spacing: .04em; }
+
+    .intro { background: linear-gradient(135deg, var(--navy-mid), #1d3a3a); border: 1px solid rgba(45,139,139,.4); border-radius: 16px; padding: 26px 32px; font-size: .95rem; color: rgba(241,250,238,.82); }
+    .intro strong { color: var(--seafoam); }
+
+    /* ── RETRIEVAL FLOW ── */
+    .ret-flow {
+      background: var(--navy-dark); border: 1px solid rgba(45,139,139,.2); border-radius: 14px;
+      padding: 24px 20px; display: flex; align-items: center; justify-content: center;
+      flex-wrap: wrap; gap: 0;
+    }
+    .rf-node {
+      background: var(--navy-mid); border: 1px solid rgba(45,139,139,.35);
+      border-radius: 10px; padding: 10px 16px; text-align: center; min-width: 96px;
+    }
+    .rf-node.active { border-color: var(--seafoam); background: rgba(45,139,139,.15); }
+    .rf-node .rn-icon { font-size: 1.2rem; margin-bottom: 3px; }
+    .rf-node .rn-label { font-size: .68rem; color: var(--teal-light); font-weight: 700; letter-spacing: .05em; margin-bottom: 2px; }
+    .rf-node.active .rn-label { color: var(--seafoam); }
+    .rf-node .rn-desc  { font-size: .73rem; color: rgba(241,250,238,.6); }
+    .rf-arrow { color: var(--teal); font-size: 1.3rem; padding: 0 5px; align-self: center; }
+
+    /* ── SIMILARITY METRICS ── */
+    .sim-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    @media(max-width:640px){ .sim-grid { grid-template-columns: 1fr; } }
+    .sim-card {
+      background: var(--navy-mid); border-radius: 14px; overflow: hidden;
+      border: 1px solid rgba(45,139,139,.22); transition: border-color .2s;
+    }
+    .sim-card:hover { border-color: var(--teal); }
+    .sim-card .sc-head { padding: 14px 18px; border-bottom: 1px solid rgba(45,139,139,.12); }
+    .s-cosine .sc-head { background: rgba(45,139,139,.15);  }
+    .s-l2     .sc-head { background: rgba(179,157,219,.1); }
+    .s-dot    .sc-head { background: rgba(232,161,74,.08); }
+    .sc-head .sh-en { font-family: 'JetBrains Mono', monospace; font-size: .95rem; font-weight: 700; margin-bottom: 2px; }
+    .s-cosine .sh-en { color: var(--seafoam); }
+    .s-l2     .sh-en { color: var(--purple); }
+    .s-dot    .sh-en { color: var(--amber); }
+    .sc-head .sh-zh { font-size: .78rem; color: rgba(241,250,238,.55); }
+    .sim-card .sc-body { padding: 16px 18px; }
+    .sim-card .sc-body p { font-size: .86rem; color: rgba(241,250,238,.7); margin-bottom: 8px; }
+    .sim-card .sc-body p:last-child { margin-bottom: 0; }
+    .sim-card .sc-tag { display: inline-block; font-size: .72rem; font-weight: 700; border-radius: 5px; padding: 2px 9px; margin-top: 6px; }
+    .s-cosine .sc-tag { background: rgba(45,139,139,.2); color: var(--seafoam); }
+    .s-l2     .sc-tag { background: rgba(179,157,219,.12); color: var(--purple); }
+    .s-dot    .sc-tag { background: rgba(232,161,74,.1); color: var(--amber); }
+
+    /* ── COSINE VISUAL ── */
+    .cosine-demo {
+      background: var(--navy-dark); border: 1px solid rgba(45,139,139,.2); border-radius: 12px;
+      padding: 20px 24px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+    }
+    @media(max-width:600px){ .cosine-demo { grid-template-columns: 1fr; } }
+    .cd-item { text-align: center; }
+    .cd-item .ci-svg { width: 80px; height: 80px; margin: 0 auto 8px; }
+    .cd-item .ci-label { font-size: .8rem; font-weight: 700; margin-bottom: 4px; }
+    .cd-item.similar .ci-label { color: var(--green); }
+    .cd-item.dissimilar .ci-label { color: var(--red); }
+    .cd-item .ci-desc { font-size: .78rem; color: rgba(241,250,238,.6); }
+
+    /* ── VECTOR SEARCH PROS/CONS ── */
+    .pros-cons { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media(max-width:620px){ .pros-cons { grid-template-columns: 1fr; } }
+    .pc-card { border-radius: 14px; padding: 22px 22px; }
+    .pc-pros { background: rgba(107,203,119,.07); border: 1px solid rgba(107,203,119,.3); }
+    .pc-cons { background: rgba(224,108,117,.07); border: 1px solid rgba(224,108,117,.3); }
+    .pc-card .pc-label { font-size: .7rem; font-weight: 700; letter-spacing: .12em; margin-bottom: 12px; }
+    .pc-pros .pc-label { color: var(--green); }
+    .pc-cons .pc-label { color: var(--red); }
+    .pc-card ul { list-style: none; }
+    .pc-card ul li { font-size: .875rem; color: rgba(241,250,238,.73); padding: 5px 0 5px 20px; position: relative; border-bottom: 1px solid rgba(255,255,255,.04); }
+    .pc-card ul li:last-child { border-bottom: none; }
+    .pc-pros ul li::before { content: '✓'; position: absolute; left: 0; color: var(--green); font-weight: 700; }
+    .pc-cons ul li::before { content: '✗'; position: absolute; left: 0; color: var(--red); }
+
+    /* ── HYBRID SEARCH ── */
+    .hybrid-diagram {
+      background: var(--navy-mid); border: 1px solid rgba(45,139,139,.25); border-radius: 16px; overflow: hidden;
+    }
+    .hd-header { background: rgba(45,139,139,.15); padding: 16px 24px; border-bottom: 1px solid rgba(45,139,139,.2); }
+    .hd-header h3 { font-size: 1rem; font-weight: 700; color: var(--white); }
+    .hd-header p  { font-size: .83rem; color: rgba(241,250,238,.6); margin-top: 2px; }
+    .hd-body { padding: 22px 24px; }
+    .hd-row { display: grid; grid-template-columns: 1fr 50px 1fr 50px 1fr; gap: 0; align-items: center; margin-bottom: 16px; }
+    @media(max-width:640px){ .hd-row { grid-template-columns: 1fr; } }
+    .hd-row:last-child { margin-bottom: 0; }
+    .hd-box {
+      background: var(--navy-dark); border-radius: 10px; padding: 14px 16px; text-align: center;
+    }
+    .hd-box .hb-label { font-size: .68rem; font-weight: 700; letter-spacing: .08em; margin-bottom: 6px; }
+    .hd-box.vector .hb-label { color: var(--teal-light); }
+    .hd-box.keyword .hb-label { color: var(--purple); }
+    .hd-box.fusion .hb-label { color: var(--seafoam); }
+    .hd-box h4 { font-size: .88rem; font-weight: 700; color: var(--white); margin-bottom: 4px; }
+    .hd-box p  { font-size: .8rem; color: rgba(241,250,238,.6); }
+    .hd-op { text-align: center; font-size: 1.3rem; color: rgba(45,139,139,.5); font-weight: 700; }
+    .bm25-note {
+      background: rgba(179,157,219,.07); border: 1px solid rgba(179,157,219,.25); border-radius: 10px;
+      padding: 14px 18px; margin-top: 4px; font-size: .84rem; color: rgba(241,250,238,.72);
+    }
+    .bm25-note strong { color: var(--purple); }
+
+    /* ── MULTI-STAGE ── */
+    .multistage { display: flex; flex-direction: column; gap: 0; }
+    .ms-stage {
+      display: grid; grid-template-columns: 80px 1fr; background: var(--navy-mid);
+      border: 1px solid rgba(45,139,139,.2); overflow: hidden;
+    }
+    .ms-stage:first-child { border-radius: 14px 14px 0 0; }
+    .ms-stage:last-child  { border-radius: 0 0 14px 14px; border-top: none; }
+    .ms-stage:not(:last-child) { border-bottom: 1px solid rgba(45,139,139,.15); }
+    .ms-left {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      padding: 20px 12px; gap: 6px;
+    }
+    .ms-stage.s1 .ms-left { background: rgba(45,139,139,.12); }
+    .ms-stage.s2 .ms-left { background: rgba(168,218,220,.08); }
+    .ms-stage.s3 .ms-left { background: rgba(107,203,119,.07); }
+    .ms-left .sl-num { font-family: 'JetBrains Mono', monospace; font-size: 1.2rem; font-weight: 700; }
+    .ms-stage.s1 .sl-num { color: var(--teal-light); }
+    .ms-stage.s2 .sl-num { color: var(--seafoam); }
+    .ms-stage.s3 .sl-num { color: var(--green); }
+    .ms-left .sl-icon { font-size: 1.4rem; }
+    .ms-right { padding: 18px 22px; }
+    .ms-right h4 { font-size: .95rem; font-weight: 700; color: var(--white); margin-bottom: 6px; }
+    .ms-right p  { font-size: .875rem; color: rgba(241,250,238,.7); }
+    .ms-right .ms-kv { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .ms-kv .kv-chip {
+      font-family: 'JetBrains Mono', monospace; font-size: .73rem; padding: 2px 10px;
+      border-radius: 5px;
+    }
+    .kv-recall { background: rgba(45,139,139,.15); border: 1px solid rgba(45,139,139,.35); color: var(--seafoam); }
+    .kv-prec   { background: rgba(107,203,119,.12); border: 1px solid rgba(107,203,119,.35); color: var(--green); }
+    .kv-out    { background: rgba(168,218,220,.1);  border: 1px solid rgba(168,218,220,.3); color: var(--seafoam); }
+
+    /* ── PRE vs POST CHUNKING ── */
+    .chunk-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media(max-width:620px){ .chunk-compare { grid-template-columns: 1fr; } }
+    .cc-card { background: var(--navy-mid); border: 1px solid rgba(45,139,139,.22); border-radius: 14px; overflow: hidden; }
+    .cc-card .cch { padding: 14px 20px; font-size: .75rem; font-weight: 700; letter-spacing: .1em; border-bottom: 1px solid rgba(45,139,139,.12); }
+    .cc-card.pre  .cch { background: rgba(45,139,139,.12); color: var(--teal-light); }
+    .cc-card.post .cch { background: rgba(232,161,74,.08);  color: var(--amber); }
+    .cc-card .ccb { padding: 16px 20px; }
+    .cc-card .ccb p { font-size: .86rem; color: rgba(241,250,238,.7); margin-bottom: 8px; }
+    .cc-card .ccb ul { list-style: none; }
+    .cc-card .ccb ul li { font-size: .84rem; color: rgba(241,250,238,.65); padding: 3px 0 3px 16px; position: relative; }
+    .cc-card .ccb ul li::before { content: '·'; position: absolute; left: 4px; color: var(--teal-light); font-size: 1.1rem; line-height: 1.4; }
+    .cc-card .cc-tag { font-size: .72rem; font-weight: 700; border-radius: 5px; padding: 2px 9px; display: inline-block; margin-top: 8px; }
+    .cc-card.pre  .cc-tag { background: rgba(45,139,139,.2); color: var(--seafoam); }
+    .cc-card.post .cc-tag { background: rgba(232,161,74,.12); color: var(--amber); }
+    .cc-card .cc-pro { font-size: .79rem; color: var(--green);  margin-top: 6px; }
+    .cc-card .cc-con { font-size: .79rem; color: var(--red);    margin-top: 4px; }
+
+    /* ── GOLDEN ── */
+    .golden { background: rgba(45,139,139,.1); border-left: 4px solid var(--teal); border-radius: 0 12px 12px 0; padding: 18px 26px; font-size: .93rem; color: rgba(241,250,238,.85); margin-bottom: 12px; }
+    .golden strong { color: var(--seafoam); }
+    .warn-box { background: rgba(232,161,74,.08); border-left: 4px solid var(--amber); border-radius: 0 12px 12px 0; padding: 16px 22px; font-size: .88rem; color: rgba(241,250,238,.8); margin-bottom: 12px; }
+    .warn-box strong { color: var(--amber); }
+
+    /* ── SUMMARY TABLE ── */
+    .tbl-wrap { overflow-x: auto; border-radius: 12px; border: 1px solid rgba(45,139,139,.25); }
+    .sum-table { width: 100%; border-collapse: collapse; }
+    .sum-table th { background: rgba(45,139,139,.25); color: var(--seafoam); font-size: .8rem; font-weight: 700; letter-spacing: .05em; padding: 11px 16px; text-align: left; border-bottom: 2px solid var(--teal); }
+    .sum-table td { padding: 11px 16px; font-size: .855rem; color: rgba(241,250,238,.78); border-bottom: 1px solid rgba(45,139,139,.15); vertical-align: top; }
+    .sum-table tr:last-child td { border-bottom: none; }
+    .sum-table tr:nth-child(odd) td { background: rgba(255,255,255,.025); }
+    .chip { display: inline-block; background: rgba(45,139,139,.2); border: 1px solid rgba(45,139,139,.4); color: var(--seafoam); font-size: .75rem; font-weight: 600; border-radius: 6px; padding: 2px 9px; font-family: 'JetBrains Mono', monospace; }
+
+    footer { text-align: center; padding: 30px 24px; border-top: 1px solid rgba(45,139,139,.2); font-size: .78rem; color: rgba(241,250,238,.3); }
+    footer strong { color: var(--teal-light); }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="badge">🔍 搜尋工程單元整理</div>
+  <h1>Retrieval <span>算法策略比較</span></h1>
+  <p class="subtitle">張維元 ── RAG 精準搜尋實戰 03-04 | 向量搜尋 × Hybrid（BM25）× Multi-Stage × Pre/Post Chunking 完整策略解析</p>
+</header>
+
+<main>
+
+  <!-- 核心觀念 -->
+  <div class="sec"><div class="bar"></div><h2>🎯 最重要的觀念：找對比生成更重要</h2></div>
+  <div class="intro">
+    RAG 的重點不是生成模型有多強，而是<strong>找到生成的來源與條件</strong>。找到對的 Chunk，普通模型也能回答得不錯；找錯了來源，再強的模型也會胡說八道。<br><br>
+    本單元從「資料工程」進入到「<strong>搜尋工程</strong>」，深入解析如何用最佳的算法策略找到最正確的參考資料。
+  </div>
+
+  <!-- Retrieval 在 RAG 中的位置 -->
+  <div class="sec"><div class="bar"></div><h2>🔄 Retrieval 在 RAG 流程中的位置</h2></div>
+  <div class="ret-flow">
+    <div class="rf-node">
+      <div class="rn-icon">📄</div>
+      <div class="rn-label">文件分割</div>
+      <div class="rn-desc">Chunking</div>
+    </div>
+    <div class="rf-arrow">→</div>
+    <div class="rf-node">
+      <div class="rn-icon">🔢</div>
+      <div class="rn-label">Embedding</div>
+      <div class="rn-desc">向量編碼</div>
+    </div>
+    <div class="rf-arrow">→</div>
+    <div class="rf-node">
+      <div class="rn-icon">🗄️</div>
+      <div class="rn-label">向量資料庫</div>
+      <div class="rn-desc">建立索引</div>
+    </div>
+    <div class="rf-arrow">→</div>
+    <div class="rf-node active">
+      <div class="rn-icon">🔍</div>
+      <div class="rn-label">Retrieval</div>
+      <div class="rn-desc">相似度查詢</div>
+    </div>
+    <div class="rf-arrow">→</div>
+    <div class="rf-node active">
+      <div class="rn-icon">🏆</div>
+      <div class="rn-label">Re-Rank</div>
+      <div class="rn-desc">精準排序</div>
+    </div>
+    <div class="rf-arrow">→</div>
+    <div class="rf-node">
+      <div class="rn-icon">🤖</div>
+      <div class="rn-label">LLM 生成</div>
+      <div class="rn-desc">上下文擴增</div>
+    </div>
+  </div>
+
+  <!-- 三種相似度計算方法 -->
+  <div class="sec"><div class="bar"></div><h2>📐 三種向量相似度計算方法</h2></div>
+  <div class="sim-grid">
+    <div class="sim-card s-cosine">
+      <div class="sc-head">
+        <div class="sh-en">Cosine Similarity</div>
+        <div class="sh-zh">餘弦相似度</div>
+      </div>
+      <div class="sc-body">
+        <p>計算兩個向量之間的<strong>夾角</strong>，只看方向、忽略向量長度。夾角越小（趨近 0°），Cosine 值越接近 1，代表越相似。</p>
+        <p>0°→1（完全相同）/ 90°→0（不相關）/ 180°→-1（相反）</p>
+        <div class="sc-tag">✅ 語意搜尋最常用</div>
+      </div>
+    </div>
+    <div class="sim-card s-l2">
+      <div class="sc-head">
+        <div class="sh-en">L2 Distance</div>
+        <div class="sh-zh">歐氏距離</div>
+      </div>
+      <div class="sc-body">
+        <p>計算兩個向量在向量空間中的<strong>直線距離</strong>。距離越小代表越相似，是傳統資料科學常用的距離計算方式。</p>
+        <p>缺點：容易受到向量長度（magnitude）影響，在不同尺度的資料上可能失真。</p>
+        <div class="sc-tag">△ 部分資料庫預設使用</div>
+      </div>
+    </div>
+    <div class="sim-card s-dot">
+      <div class="sc-head">
+        <div class="sh-en">Dot Product</div>
+        <div class="sh-zh">內積</div>
+      </div>
+      <div class="sc-body">
+        <p>計算兩向量的<strong>方向 × 強度</strong>的乘積，同時考量角度與大小。若向量已正規化（長度=1），結果等同 Cosine。</p>
+        <p>缺點：受向量大小影響，若未正規化，長度大的向量得分自然偏高。</p>
+        <div class="sc-tag">△ 需正規化才適合語意搜尋</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cosine 視覺示意 -->
+  <div class="cosine-demo" style="margin-top:14px">
+    <div class="cd-item similar">
+      <svg class="ci-svg" viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
+        <line x1="40" y1="70" x2="70" y2="20" stroke="#6bcb77" stroke-width="2.5" stroke-linecap="round"/>
+        <line x1="40" y1="70" x2="62" y2="18" stroke="#a8dadc" stroke-width="2.5" stroke-linecap="round"/>
+        <path d="M56 30 A18 18 0 0 0 64 26" stroke="#e8a14a" stroke-width="1.5" fill="none"/>
+        <text x="60" y="40" fill="#e8a14a" font-size="10" font-family="JetBrains Mono">≈15°</text>
+        <circle cx="40" cy="70" r="3" fill="#2d8b8b"/>
+      </svg>
+      <div class="ci-label">夾角小 → 相似度高</div>
+      <div class="ci-desc">Cosine ≈ 0.97<br>兩向量方向幾乎相同</div>
+    </div>
+    <div class="cd-item dissimilar">
+      <svg class="ci-svg" viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
+        <line x1="40" y1="70" x2="70" y2="20" stroke="#e06c75" stroke-width="2.5" stroke-linecap="round"/>
+        <line x1="40" y1="70" x2="10" y2="20" stroke="#a8dadc" stroke-width="2.5" stroke-linecap="round"/>
+        <path d="M54 36 A30 30 0 0 0 26 36" stroke="#e8a14a" stroke-width="1.5" fill="none"/>
+        <text x="30" y="28" fill="#e8a14a" font-size="10" font-family="JetBrains Mono">≈80°</text>
+        <circle cx="40" cy="70" r="3" fill="#2d8b8b"/>
+      </svg>
+      <div class="ci-label">夾角大 → 相似度低</div>
+      <div class="ci-desc">Cosine ≈ 0.17<br>兩向量方向差異大</div>
+    </div>
+  </div>
+
+  <!-- 向量搜尋優缺點 -->
+  <div class="sec"><div class="bar"></div><h2>⚡ 向量搜尋（Dense Retrieval）的優勢與限制</h2></div>
+  <div class="pros-cons">
+    <div class="pc-card pc-pros">
+      <div class="pc-label">✅ 向量搜尋的優勢</div>
+      <ul>
+        <li>捕捉自然語言中<strong>複雜、模糊的表達</strong>（同義詞、近似詞、同音異字）</li>
+        <li>理解文本之間的<strong>語意關係</strong>（上下位、因果、相似關係）</li>
+        <li>跨語言搜尋：不同語言的向量也能互相理解與比對</li>
+        <li>支援<strong>多模態</strong>搜尋：文字對圖片、文字對聲音</li>
+        <li>不需要完全匹配關鍵字，語意理解後仍能找到相關資料</li>
+      </ul>
+    </div>
+    <div class="pc-card pc-cons">
+      <div class="pc-label">❌ 向量搜尋的限制</div>
+      <ul>
+        <li><strong>精準關鍵字</strong>搜尋效果差：「第3條第2項」這類嚴謹用字容易失真</li>
+        <li>數字、順序、代碼等結構性資料，向量化後語意會模糊</li>
+        <li>越精準的匹配需求，向量搜尋反而越不適合</li>
+        <li>法規條文、合約條款等需<strong>精確引用</strong>的場景，建議搭配關鍵字搜尋</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- Hybrid Search -->
+  <div class="sec"><div class="bar"></div><h2>🔀 Hybrid Search：向量搜尋 + BM25 關鍵字搜尋</h2></div>
+  <div class="hybrid-diagram">
+    <div class="hd-header">
+      <h3>混合搜尋 = 語意理解 × 精準關鍵字</h3>
+      <p>用兩種搜尋各自的強項互補，再融合分數，同時擁有模糊語意與精準關鍵字的能力</p>
+    </div>
+    <div class="hd-body">
+      <div class="hd-row">
+        <div class="hd-box vector">
+          <div class="hb-label">DENSE RETRIEVAL</div>
+          <h4>向量搜尋</h4>
+          <p>語意模糊匹配<br>捕捉概念相似</p>
+        </div>
+        <div class="hd-op">+</div>
+        <div class="hd-box keyword">
+          <div class="hb-label">SPARSE RETRIEVAL</div>
+          <h4>BM25 關鍵字</h4>
+          <p>精準關鍵字匹配<br>罕見詞權重提高</p>
+        </div>
+        <div class="hd-op">→</div>
+        <div class="hd-box fusion">
+          <div class="hb-label">SCORE FUSION</div>
+          <h4>分數權重融合</h4>
+          <p>兩種分數加權合併<br>取最終排序結果</p>
+        </div>
+      </div>
+
+      <div class="bm25-note">
+        <strong>BM25（Best Matching 25）</strong>— 傳統 TF-IDF 的進化版，ElasticSearch 的核心算法：
+        <ul style="list-style:none;margin-top:8px">
+          <li style="padding:3px 0 3px 16px;position:relative;font-size:.83rem"><span style="position:absolute;left:0;color:var(--teal-light)">→</span> <strong>罕見詞（如專有名詞）</strong>權重提高，越獨特越重要</li>
+          <li style="padding:3px 0 3px 16px;position:relative;font-size:.83rem"><span style="position:absolute;left:0;color:var(--teal-light)">→</span> <strong>常見詞（你我他、的地得）</strong>權重降低，避免干擾</li>
+          <li style="padding:3px 0 3px 16px;position:relative;font-size:.83rem"><span style="position:absolute;left:0;color:var(--teal-light)">→</span> 同時考量詞頻飽和度，避免同一個字重複出現導致分數虛高</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- Multi-Stage Retrieval -->
+  <div class="sec"><div class="bar"></div><h2>🏗️ Multi-Stage Retrieval：兩階段策略</h2></div>
+  <div style="background:rgba(45,139,139,.08);border:1px solid rgba(45,139,139,.2);border-radius:12px;padding:14px 22px;margin-bottom:18px;font-size:.88rem;color:rgba(241,250,238,.75)">
+    💡 單一階段搜尋難以同時兼顧 <strong style="color:var(--seafoam)">Recall（召回率）</strong> 和 <strong style="color:var(--green)">Precision（精準率）</strong>。兩階段策略的核心思路：<strong>第一階段撈廣（高 Recall）→ 第二階段排準（高 Precision）</strong>。
+  </div>
+  <div class="multistage">
+    <div class="ms-stage s1">
+      <div class="ms-left">
+        <div class="sl-num">01</div>
+        <div class="sl-icon">🌊</div>
+      </div>
+      <div class="ms-right">
+        <h4>初篩階段：快速大量召回（高 Recall）</h4>
+        <p>用向量搜尋或 Hybrid Search 快速、便宜地從大量資料中撈出可能相關的候選集，寧可多抓也不要漏掉正確答案。資料量小可直接用向量搜尋，資料量大建議用 Hybrid。</p>
+        <div class="ms-kv">
+          <span class="kv-chip kv-recall">目標：Top-20 ～ Top-100</span>
+          <span class="kv-chip kv-recall">策略：向量搜尋 / Hybrid</span>
+          <span class="kv-chip kv-recall">特性：快速、便宜</span>
+        </div>
+      </div>
+    </div>
+    <div class="ms-stage s2">
+      <div class="ms-left">
+        <div class="sl-num">02</div>
+        <div class="sl-icon">🎯</div>
+      </div>
+      <div class="ms-right">
+        <h4>精排階段：Re-Rank 提升精準度（高 Precision）</h4>
+        <p>對初篩的候選結果進行<strong>二次精細排序</strong>，判斷每個 Chunk 與 Query 的真實相關性，將最符合的資料往前推。直接對全量資料排序成本太高，因此先初篩再細排。</p>
+        <div class="ms-kv">
+          <span class="kv-chip kv-prec">目標：Top-3 ～ Top-5</span>
+          <span class="kv-chip kv-prec">策略：Cross-Encoder Re-Rank</span>
+          <span class="kv-chip kv-prec">特性：準確、成本較高</span>
+        </div>
+      </div>
+    </div>
+    <div class="ms-stage s3">
+      <div class="ms-left">
+        <div class="sl-num">03</div>
+        <div class="sl-icon">🤖</div>
+      </div>
+      <div class="ms-right">
+        <h4>生成階段：精排結果注入 LLM 上下文</h4>
+        <p>將 Re-Rank 後排序最前的 Chunk 作為上下文，送入 LLM 生成最終回答。此時 LLM 拿到的是<strong>精準且相關的參考資料</strong>，回答品質自然提升。</p>
+        <div class="ms-kv">
+          <span class="kv-chip kv-out">輸出：準確且友善的回答</span>
+          <span class="kv-chip kv-out">降低幻覺風險</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 召回率 vs 精準率說明 -->
+  <div style="background:var(--navy-mid);border:1px solid rgba(45,139,139,.22);border-radius:14px;padding:20px 24px;margin-top:16px">
+    <div style="font-size:.78rem;font-weight:700;color:var(--teal-light);letter-spacing:.08em;margin-bottom:14px">為什麼要分兩階段？Recall vs Precision 的天生矛盾</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div style="background:rgba(45,139,139,.1);border:1px solid rgba(45,139,139,.3);border-radius:10px;padding:14px 16px">
+        <div style="font-size:.72rem;font-weight:700;color:var(--teal-light);letter-spacing:.08em;margin-bottom:6px">RECALL（召回率）— 第一階段目標</div>
+        <div style="font-size:.86rem;color:rgba(241,250,238,.75)">把所有正確答案都撈出來，寧可多抓不要漏。向量搜尋天生 Recall 高，但排序不夠精準——答案可能在第6名而非前5名。</div>
+      </div>
+      <div style="background:rgba(107,203,119,.07);border:1px solid rgba(107,203,119,.3);border-radius:10px;padding:14px 16px">
+        <div style="font-size:.72rem;font-weight:700;color:var(--green);letter-spacing:.08em;margin-bottom:6px">PRECISION（精準率）— 第二階段目標</div>
+        <div style="font-size:.86rem;color:rgba(241,250,238,.75)">取回的結果都是真正相關的，盡量減少雜訊。Re-Rank 模型對候選集做精細判斷，把真正相關的資料推到最前面。</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pre vs Post Chunking -->
+  <div class="sec"><div class="bar"></div><h2>✂️ Pre-Chunking vs Post-Chunking</div></div>
+  <div class="chunk-compare">
+    <div class="cc-card pre">
+      <div class="cch">📥 Pre-Chunking（靜態切分）</div>
+      <div class="ccb">
+        <p>在資料存入向量資料庫<strong>之前</strong>就先切好，建立索引時資料形式已確定。</p>
+        <ul>
+          <li>資料穩定、容易維護</li>
+          <li>容易 Scale，適合大量資料</li>
+          <li>使用者問任何問題，都用同樣切好的資料回答（靜態）</li>
+        </ul>
+        <div class="cc-tag">📌 最常見的傳統做法</div>
+        <div class="cc-pro">✓ 效率高、建置成本低</div>
+        <div class="cc-con">✗ 切錯了難補救（Embedding 已算好）</div>
+      </div>
+    </div>
+    <div class="cc-card post">
+      <div class="cch">📤 Post-Chunking（動態切分）</div>
+      <div class="ccb">
+        <p>先把整份文件存起來，等到<strong>查詢之後</strong>再依需求重新切分與整理。</p>
+        <ul>
+          <li>可根據問題、結果、上下文長度<strong>動態調整</strong></li>
+          <li>合併相鄰 Chunk、Sliding Window 補充上下文</li>
+          <li>重新摘要成更精準的 Context 送給 LLM</li>
+        </ul>
+        <div class="cc-tag">🆕 近期流行的進階策略</div>
+        <div class="cc-pro">✓ 回答品質更好，上下文更完整</div>
+        <div class="cc-con">✗ 查詢時處理成本較高</div>
+      </div>
+    </div>
+  </div>
+  <div style="background:rgba(45,139,139,.08);border:1px solid rgba(45,139,139,.2);border-radius:10px;padding:14px 20px;margin-top:12px;font-size:.87rem;color:rgba(241,250,238,.72)">
+    💡 <strong style="color:var(--seafoam)">混搭使用</strong>：實務上通常先用 Pre-Chunking 建立知識庫，再透過 Post-Chunking（如合併鄰近 Chunk、重新摘要）補足前者的不足，讓 LLM 能在生成前拿到最完整的上下文。
+  </div>
+
+  <!-- 核心觀念 -->
+  <div class="sec"><div class="bar"></div><h2>💡 核心觀念</h2></div>
+  <div class="golden">
+    <strong>找對比生成更重要。</strong>Retrieval 的目標是確保正確資料進入 LLM 的上下文。找對了，普通模型也能答得好；找錯了，再強的模型也會出錯。
+  </div>
+  <div class="golden">
+    <strong>單一搜尋方法難以滿足複雜查詢。</strong>向量搜尋擅長語意模糊匹配，BM25 擅長精準關鍵字；Hybrid Search 結合兩者長處，是現代 RAG 的推薦策略。
+  </div>
+  <div class="warn-box">
+    <strong>⚠ Multi-Stage 的本質是成本與品質的取捨。</strong>不是所有場景都需要兩階段——資料量小、查詢單純時，單階段向量搜尋即可。資料量大、需要高精準度時，才值得付出 Re-Rank 的額外成本。
+  </div>
+
+  <!-- 策略對照表 -->
+  <div class="sec"><div class="bar"></div><h2>📋 Retrieval 策略完整對照表</h2></div>
+  <div class="tbl-wrap">
+    <table class="sum-table">
+      <thead>
+        <tr><th>策略</th><th>核心方法</th><th>優點</th><th>缺點</th><th>適合場景</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="chip">Dense</span></td>
+          <td>向量 Cosine 相似度</td>
+          <td>語意模糊匹配、跨語言、多模態</td>
+          <td>精準關鍵字搜尋效果差</td>
+          <td>概念查詢、問答型應用</td>
+        </tr>
+        <tr>
+          <td><span class="chip">Sparse</span></td>
+          <td>BM25 關鍵字搜尋</td>
+          <td>精準關鍵字匹配、可解釋性高</td>
+          <td>無法理解語意與同義詞</td>
+          <td>法規條文、合約、精確引用</td>
+        </tr>
+        <tr>
+          <td><span class="chip">Hybrid</span></td>
+          <td>Dense + BM25 加權融合</td>
+          <td>同時兼顧語意與精準關鍵字</td>
+          <td>需調整兩種分數的權重比例</td>
+          <td>大多數生產環境 RAG 推薦</td>
+        </tr>
+        <tr>
+          <td><span class="chip">Multi-Stage</span></td>
+          <td>初篩（高 Recall）→ Re-Rank（高 Precision）</td>
+          <td>召回率與精準率都能兼顧</td>
+          <td>Re-Rank 成本較高、延遲增加</td>
+          <td>資料量大、商用 RAG 系統</td>
+        </tr>
+        <tr>
+          <td><span class="chip">Pre-Chunking</span></td>
+          <td>靜態切分，存入向量庫</td>
+          <td>穩定、易維護、可大規模擴充</td>
+          <td>切錯難補救</td>
+          <td>大多數 RAG 系統的預設起點</td>
+        </tr>
+        <tr>
+          <td><span class="chip">Post-Chunking</span></td>
+          <td>動態切分，查詢後整理</td>
+          <td>回答品質更好、上下文更完整</td>
+          <td>查詢時成本較高</td>
+          <td>需要高品質回答的進階 RAG</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+</main>
+
+<footer>
+  整理自 <strong>張維元 ── RAG 精準搜尋實戰 03-04</strong>｜Retrieval 算法策略比較
+</footer>
+
+</body>
+</html>
